@@ -467,3 +467,90 @@ def test_9_process_restart_and_persistence(client):
         assert reloaded_nodes[1].status == NodeStatus.IN_PROGRESS.value
     finally:
         fresh_db.close()
+
+
+def test_10_student_profile_update_and_dashboard_summary(client):
+    """
+    Test 10: Profile preferences editing and unified dashboard summary API:
+    - PATCH /api/students/{id} updates career_goal and weekly_hours in SQLite.
+    - GET /api/students/{id}/dashboard returns consolidated state.
+    """
+    resp = client.post("/api/students", json={"name": "Isaac Newton", "career_goal": "Physics"})
+    student_id = resp.json()["id"]
+
+    # Update profile
+    patch_resp = client.patch(f"/api/students/{student_id}", json={
+        "career_goal": "AI/ML Engineer",
+        "weekly_hours": 20.0,
+    })
+    assert patch_resp.status_code == 200
+    updated_data = patch_resp.json()
+    assert updated_data["career_goal"] == "AI/ML Engineer"
+    assert updated_data["weekly_hours"] == 20.0
+
+    # Fetch unified dashboard summary
+    dash_resp = client.get(f"/api/students/{student_id}/dashboard")
+    assert dash_resp.status_code == 200
+    dash_data = dash_resp.json()
+    assert dash_data["student"]["name"] == "Isaac Newton"
+    assert dash_data["next_action"]["action"] == ScholarAction.COLLECT_MORE_EVIDENCE.value
+    assert len(dash_data["roadmap"]) == 8
+
+
+def test_11_evidence_based_module_completion_verification(client):
+    """
+    Test 11: Evidence-based module completion and rich node details:
+    - GET /api/students/{id}/roadmap/{node_id}/details returns learning objectives and required vs current evidence.
+    - Attempting to complete with 0 solves returns allowed=False with INSUFFICIENT_EVIDENCE.
+    - Logging required independent solves satisfies evidence requirement and completes module.
+    """
+    resp = client.post("/api/students", json={"name": "Ada Lovelace", "career_goal": "Computing"})
+    student_id = resp.json()["id"]
+
+    nodes = client.get(f"/api/students/{student_id}/roadmap").json()
+    node_1 = nodes[0]
+    assert node_1["status"] == "IN_PROGRESS"
+
+    # 1. Fetch rich node details
+    details_resp = client.get(f"/api/students/{student_id}/roadmap/{node_1['id']}/details")
+    assert details_resp.status_code == 200
+    details = details_resp.json()
+    assert len(details["what_you_learn"]) >= 3
+    assert details["required_evidence"] == 2
+    assert details["current_evidence"] == 0
+    assert details["can_complete"] is False
+
+    # 2. Try to complete without sufficient evidence
+    verify_resp = client.post(f"/api/students/{student_id}/roadmap/{node_1['id']}/verify-completion")
+    assert verify_resp.status_code == 200
+    verify_data = verify_resp.json()
+    assert verify_data["allowed"] is False
+    assert verify_data["status"] == "INSUFFICIENT_EVIDENCE"
+    assert verify_data["current_evidence"] == 0
+    assert verify_data["required_evidence"] == 2
+
+    # 3. Log 2 independent solved problems
+    for pid in ["prob_arr_01", "prob_arr_02"]:
+        client.post(f"/api/students/{student_id}/telemetry", json={
+            "problem_id": pid,
+            "topic": "Arrays & Hashing",
+            "difficulty": "Easy",
+            "submission_count": 1,
+            "successful": True,
+            "first_attempt_pass": True,
+            "hints_requested": 0,
+            "active_coding_duration_seconds": 600,
+        })
+
+    # 4. Verify completion now succeeds
+    success_resp = client.post(f"/api/students/{student_id}/roadmap/{node_1['id']}/verify-completion")
+    assert success_resp.status_code == 200
+    success_data = success_resp.json()
+    assert success_data["allowed"] is True
+    assert success_data["status"] == "COMPLETED"
+
+    # Verify node 1 is COMPLETED and node 2 is unlocked
+    updated_nodes = client.get(f"/api/students/{student_id}/roadmap").json()
+    assert updated_nodes[0]["status"] == "COMPLETED"
+    assert updated_nodes[1]["status"] == "IN_PROGRESS"
+    assert updated_nodes[1]["is_locked"] is False

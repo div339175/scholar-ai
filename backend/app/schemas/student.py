@@ -14,6 +14,12 @@ class StudentCreate(StudentBase):
     id: Optional[str] = None
     baseline_level: Optional[str] = "Intermediate"
 
+class StudentUpdate(BaseModel):
+    name: Optional[str] = None
+    career_goal: Optional[str] = None
+    weekly_hours: Optional[float] = None
+    baseline_level: Optional[str] = None
+
 class StudentResponse(StudentBase):
     id: str
     created_at: datetime

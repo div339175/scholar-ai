@@ -946,5 +946,235 @@ describe("Scholar AI Frontend Integration Tests", () => {
       expect(startSpy).toHaveBeenCalledWith("student_test_2", "node_tp_02");
     });
   });
+
+  // 21. "Why this action?" Evidence Breakdown Modal
+  it("opens 'Why am I seeing this recommendation?' modal when clicking Why this action? button", async () => {
+    vi.spyOn(scholarApi, "getStudentProfile").mockResolvedValue({
+      id: "student_test_3",
+      name: "Galileo Galilei",
+      career_goal: "Full-Stack Developer",
+      weekly_hours: 15,
+      current_streak: 2,
+      roadmap_completion: 25.0,
+    });
+    vi.spyOn(scholarApi, "getScholarState").mockResolvedValue({
+      student_id: "student_test_3",
+      false_progress: {
+        detected: true,
+        index: 85.0,
+        severity: "CRITICAL",
+        triggers: ["FP_HINT_CRUTCH", "FP_BRUTE_FORCE"],
+      },
+      intervention: {
+        required: true,
+        type: "PAUSE_ADVANCEMENT",
+        priority: "CRITICAL",
+        target_topics: ["Sliding Window"],
+        roadmap_action: "PAUSE_ADVANCEMENT",
+      },
+      mastery: { status: "NO_RECORDED_CHECK", topic: null, decision: null, conceptual_score: null, conceptual_score_source: null, independent_success: null },
+      roadmap: { action: "PAUSE_ADVANCEMENT", topic: "Sliding Window", evidence_status: "PAUSED" },
+      capability: { standard_readiness_score: 72.0, verified_capability_score: 24.1, readiness_status: "NOT_VERIFIED", mastery_coverage: 0.0, mastery_confidence_multiplier: 0.5 },
+      evidence_chain: [],
+    });
+    vi.spyOn(scholarApi, "getNextAction").mockResolvedValue({
+      student_id: "student_test_3",
+      action: "COMPLETE_MASTERY_CHECK",
+      target_topic: "Sliding Window",
+      reason: "Recent activity indicates hint reliance on Sliding Window. Verify mastery before advancing.",
+      source_components: ["FALSE_PROGRESS_DETECTOR", "INTERVENTION_ENGINE"],
+    });
+    vi.spyOn(scholarApi, "getRoadmap").mockResolvedValue([]);
+    vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+
+    render(
+      <StudentDashboardView
+        studentId="student_test_3"
+        isDemoMode={false}
+        onToggleDemoMode={vi.fn()}
+        onSelectStudent={vi.fn()}
+        onBackToLanding={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Why this action?")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText("Why this action?"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Scholar AI Evidence Explanation")).toBeTruthy();
+      expect(screen.getByText(/Why am I seeing this recommendation\?/i)).toBeTruthy();
+      expect(screen.getAllByText(/HINT_CRUTCH/i).length).toBeGreaterThan(0);
+    });
+  });
+
+  // 22. Clickable Roadmap Module Details Modal
+  it("opens Module Details modal with learning objectives and evidence requirements when clicking a roadmap card", async () => {
+    vi.spyOn(scholarApi, "getStudentProfile").mockResolvedValue({
+      id: "student_test_4",
+      name: "Marie Curie",
+      career_goal: "Systems Engineer",
+      weekly_hours: 12,
+      current_streak: 1,
+      roadmap_completion: 0.0,
+    });
+    vi.spyOn(scholarApi, "getScholarState").mockResolvedValue({
+      student_id: "student_test_4",
+      false_progress: { detected: false, index: 0.0, severity: "NONE", triggers: [] },
+      intervention: { required: false, type: "CONTINUE_NORMAL", priority: "LOW", target_topics: [], roadmap_action: "CONTINUE" },
+      mastery: { status: "NO_RECORDED_CHECK", topic: null, decision: null, conceptual_score: null, conceptual_score_source: null, independent_success: null },
+      roadmap: { action: "CONTINUE_NORMAL", topic: null, evidence_status: "CONTINUE" },
+      capability: { standard_readiness_score: 10.0, verified_capability_score: 10.0, readiness_status: "INSUFFICIENT_EVIDENCE", mastery_coverage: 0.0, mastery_confidence_multiplier: 1.0 },
+      evidence_chain: [],
+    });
+    vi.spyOn(scholarApi, "getNextAction").mockResolvedValue({
+      student_id: "student_test_4",
+      action: "CONTINUE_LEARNING",
+      target_topic: "Arrays & Hashing",
+      reason: "Continue.",
+      source_components: [],
+    });
+    vi.spyOn(scholarApi, "getRoadmap").mockResolvedValue([
+      {
+        id: "node_arr_01",
+        student_id: "student_test_4",
+        title: "Foundations of Arrays & Hashing",
+        topic: "Arrays & Hashing",
+        status: "IN_PROGRESS",
+        sequence: 1,
+        estimated_minutes: 120,
+        is_locked: false,
+        node_type: "NORMAL",
+      },
+    ]);
+    vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+
+    const detailsSpy = vi.spyOn(scholarApi, "getRoadmapNodeDetails").mockResolvedValue({
+      id: "node_arr_01",
+      title: "Foundations of Arrays & Hashing",
+      topic: "Arrays & Hashing",
+      status: "IN_PROGRESS",
+      sequence: 1,
+      estimated_minutes: 120,
+      is_locked: false,
+      node_type: "NORMAL",
+      what_you_learn: [
+        "In-place array indexing and pointer arithmetic",
+        "Hash map key-value lookups with expected O(1) time complexity",
+      ],
+      required_evidence: 2,
+      current_evidence: 1,
+      prerequisite_title: null,
+      prerequisite_completed: true,
+      mastery_status: "NO_RECORD",
+      can_complete: false,
+    });
+
+    render(
+      <StudentDashboardView
+        studentId="student_test_4"
+        isDemoMode={false}
+        onToggleDemoMode={vi.fn()}
+        onSelectStudent={vi.fn()}
+        onBackToLanding={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading your personalized/i)).toBeNull();
+    });
+
+    // Switch to Roadmap tab
+    const roadmapTabBtn = screen.getByRole("button", { name: /^Roadmap$/i });
+    fireEvent.click(roadmapTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Foundations of Arrays & Hashing")).toBeTruthy();
+    });
+
+    // Click module card to open details modal
+    fireEvent.click(screen.getByText("Foundations of Arrays & Hashing"));
+
+    await waitFor(() => {
+      expect(detailsSpy).toHaveBeenCalledWith("student_test_4", "node_arr_01");
+      expect(screen.getByText(/What You'll Master:/i)).toBeTruthy();
+      expect(screen.getByText(/In-place array indexing/i)).toBeTruthy();
+      expect(screen.getByText(/Required Telemetry Evidence:/i)).toBeTruthy();
+    });
+  });
+
+  // 23. Profile Preferences Editing
+  it("updates learning preferences and shows success confirmation in Profile tab", async () => {
+    vi.spyOn(scholarApi, "getStudentProfile").mockResolvedValue({
+      id: "student_test_5",
+      name: "Albert Einstein",
+      career_goal: "Physics",
+      weekly_hours: 10,
+      current_streak: 3,
+      roadmap_completion: 12.5,
+    });
+    vi.spyOn(scholarApi, "getScholarState").mockResolvedValue({
+      student_id: "student_test_5",
+      false_progress: { detected: false, index: 0.0, severity: "NONE", triggers: [] },
+      intervention: { required: false, type: "CONTINUE_NORMAL", priority: "LOW", target_topics: [], roadmap_action: "CONTINUE" },
+      mastery: { status: "NO_RECORDED_CHECK", topic: null, decision: null, conceptual_score: null, conceptual_score_source: null, independent_success: null },
+      roadmap: { action: "CONTINUE_NORMAL", topic: null, evidence_status: "CONTINUE" },
+      capability: { standard_readiness_score: 20.0, verified_capability_score: 20.0, readiness_status: "DEVELOPING", mastery_coverage: 10.0, mastery_confidence_multiplier: 1.0 },
+      evidence_chain: [],
+    });
+    vi.spyOn(scholarApi, "getNextAction").mockResolvedValue({
+      student_id: "student_test_5",
+      action: "CONTINUE_LEARNING",
+      target_topic: "Arrays & Hashing",
+      reason: "Continue.",
+      source_components: [],
+    });
+    vi.spyOn(scholarApi, "getRoadmap").mockResolvedValue([]);
+    vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+
+    const updateSpy = vi.spyOn(scholarApi, "updateStudentProfile").mockResolvedValue({
+      id: "student_test_5",
+      name: "Albert Einstein",
+      career_goal: "AI/ML Engineer",
+      weekly_hours: 20,
+      current_streak: 3,
+      roadmap_completion: 12.5,
+    });
+
+    render(
+      <StudentDashboardView
+        studentId="student_test_5"
+        isDemoMode={false}
+        onToggleDemoMode={vi.fn()}
+        onSelectStudent={vi.fn()}
+        onBackToLanding={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading your personalized/i)).toBeNull();
+    });
+
+    // Switch to Profile tab
+    const profileTabBtn = screen.getByRole("button", { name: /^Profile$/i });
+    fireEvent.click(profileTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Save Learning Preferences")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText("Save Learning Preferences"));
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith("student_test_5", expect.objectContaining({
+        name: "Albert Einstein",
+      }));
+    });
+  });
 });
 

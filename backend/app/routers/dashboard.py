@@ -4,8 +4,10 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.student import Student, ReadinessSnapshot
 from app.models.roadmap import RoadmapNode, NodeStatus, NodeType
-from app.schemas.student import StudentResponse, StudentCreate, ReadinessResponse, VerifiedCapabilityResponse
+from app.schemas.student import StudentResponse, StudentCreate, StudentUpdate, ReadinessResponse, VerifiedCapabilityResponse
 from app.services.readiness_service import ReadinessService
+from app.services.scholar_orchestrator_service import ScholarOrchestratorService
+from app.services.roadmap_service import RoadmapService
 
 router = APIRouter(prefix="/students", tags=["Dashboard & Student"])
 
@@ -94,6 +96,47 @@ def get_student(student_id: str, db: Session = Depends(get_db)):
             detail=f"Student with ID '{student_id}' not found",
         )
     return student
+
+@router.patch("/{student_id}", response_model=StudentResponse)
+def update_student_profile(student_id: str, payload: StudentUpdate, db: Session = Depends(get_db)):
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student with ID '{student_id}' not found",
+        )
+    if payload.name is not None and payload.name.strip():
+        student.name = payload.name.strip()
+    if payload.career_goal is not None and payload.career_goal.strip():
+        student.career_goal = payload.career_goal.strip()
+    if payload.weekly_hours is not None:
+        student.weekly_hours = float(payload.weekly_hours)
+    if hasattr(student, "baseline_level") and payload.baseline_level is not None:
+        student.baseline_level = payload.baseline_level
+
+    db.commit()
+    db.refresh(student)
+    return student
+
+@router.get("/{student_id}/dashboard")
+def get_student_dashboard_summary(student_id: str, db: Session = Depends(get_db)):
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student with ID '{student_id}' not found",
+        )
+    readiness = ReadinessService.evaluate_verified_capability(db, student_id)
+    next_action = ScholarOrchestratorService.get_next_action(db, student_id)
+    scholar_state = ScholarOrchestratorService.get_student_state(db, student_id)
+    roadmap = RoadmapService.get_roadmap_for_student(db, student_id)
+    return {
+        "student": student,
+        "readiness": readiness,
+        "next_action": next_action,
+        "scholar_state": scholar_state,
+        "roadmap": roadmap,
+    }
 
 @router.get("/{student_id}/readiness", response_model=ReadinessResponse)
 def get_student_readiness(student_id: str, db: Session = Depends(get_db)):

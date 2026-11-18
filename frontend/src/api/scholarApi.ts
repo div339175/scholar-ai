@@ -279,5 +279,77 @@ export const scholarApi = {
     );
     return handleResponse<any>(res);
   },
+
+  async getRoadmapNodeDetails(studentId: string, nodeId: string): Promise<{
+    id: string;
+    title: string;
+    topic: string;
+    status: string;
+    sequence: number;
+    estimated_minutes: number;
+    is_locked: boolean;
+    node_type: string;
+    what_you_learn: string[];
+    required_evidence: number;
+    current_evidence: number;
+    prerequisite_title: string | null;
+    prerequisite_completed: boolean;
+    mastery_status: string;
+    can_complete: boolean;
+  }> {
+    const res = await fetch(
+      `${BASE_URL}/students/${encodeURIComponent(studentId)}/roadmap/${encodeURIComponent(nodeId)}/details`
+    );
+    return handleResponse<any>(res);
+  },
+
+  async verifyRoadmapNodeCompletion(studentId: string, nodeId: string): Promise<{
+    allowed: boolean;
+    status: string;
+    message: string;
+    current_evidence?: number;
+    required_evidence?: number;
+    action?: string;
+    nodes?: any[];
+  }> {
+    const res = await fetch(
+      `${BASE_URL}/students/${encodeURIComponent(studentId)}/roadmap/${encodeURIComponent(nodeId)}/verify-completion`,
+      { method: "POST" }
+    );
+    return handleResponse<any>(res);
+  },
+
+  async updateStudentProfile(
+    studentId: string,
+    payload: {
+      name?: string;
+      career_goal?: string;
+      weekly_hours?: number;
+      baseline_level?: string;
+    }
+  ): Promise<StudentProfile> {
+    const res = await fetch(
+      `${BASE_URL}/students/${encodeURIComponent(studentId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    return handleResponse<StudentProfile>(res);
+  },
+
+  async getDashboardSummary(studentId: string): Promise<{
+    student: StudentProfile;
+    readiness: VerifiedCapabilityResponse;
+    next_action: ScholarNextAction;
+    scholar_state: ScholarStudentState;
+    roadmap: any[];
+  }> {
+    const res = await fetch(
+      `${BASE_URL}/students/${encodeURIComponent(studentId)}/dashboard`
+    );
+    return handleResponse<any>(res);
+  },
 };
 

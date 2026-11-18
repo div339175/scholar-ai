@@ -99,6 +99,31 @@ The audit identified several surface-level disconnects where UI components were 
 - Dynamic computation of `total_events`, `first_attempt_pass_rate`, `hint_dependency_rate`, `average_duration_seconds`, and `topic_breakdown` directly from `coding_telemetry` rows.
 - The Insights panel on the dashboard displays these real computed metrics with zero hardcoding.
 
+### F. Clickable Roadmap Module Details Modal (`GET /api/students/{id}/roadmap/{node_id}/details`)
+- **Backend**: Added module details endpoint returning canonical learning objectives (`what_you_learn`), required vs current telemetry evidence counts ($\ge 2$ solves required), prerequisite status, and completion eligibility.
+- **Frontend**: Clicking any roadmap card opens the Module Details modal, displaying learning objectives, live telemetry evidence counters, and prerequisite explanations for locked nodes.
+
+### G. Evidence-Based Module Completion (`POST /api/students/{id}/roadmap/{node_id}/verify-completion`)
+- **Backend**: Verifies that the student has at least 2 telemetry problem solves in the module topic and that advancement is not paused by an active Scholar AI intervention before permitting completion.
+- **Frontend**: Provides modal completion validation with feedback when evidence is insufficient, directing students to practice problems first.
+
+### H. Interactive Practice Solver with Dynamic Hint Telemetry
+- **Frontend**: Interactive code solver modal featuring multi-language syntax selector (Python, TypeScript, Go), live code scratchpad, and dynamic progressive hint revelation:
+  - `[Show Hint 1]`: Increments hint count by 1 and reveals algorithmic guidance.
+  - `[Show Hint 2]`: Increments hint count by 1 and provides data structure hints.
+  - `[Show Core Invariant]`: Increments hint count by 1 and reveals optimal time/space invariants.
+  - Submissions post genuine telemetry events with exact attempt counts, hint counts, and elapsed duration directly to SQLite.
+
+### I. Hero "Why this action?" Diagnostic Evidence Modal
+- Clicking "Why this action?" on the Scholar AI recommendation hero banner opens a diagnostic breakdown detailing active FPDE triggers, False Progress Index (FPI), severity level, and deterministic pedagogical explanation.
+
+### J. Projects Connected to Roadmap Competencies
+- Capstone industry projects (Distributed Key-Value Store, Real-Time Collaborative Whiteboard, Autonomous Agent Task Engine) now link directly to foundational roadmap topics with dynamic milestone prerequisite checklists verified against completed modules.
+
+### K. Profile Tab with Editable Preferences (`PATCH /api/students/{id}`)
+- **Backend**: Added `PATCH /api/students/{id}` supporting updates to student name, career goal, and weekly hours.
+- **Frontend**: Added full Profile view with editable preference fields, one-click persistence to SQLite, and an empirical learning statistics grid.
+
 ---
 
 ## 5. Features Intentionally Removed
@@ -260,7 +285,7 @@ Where:
 ## 14. Automated Test Results
 
 ### Backend Suite (`pytest backend/tests/ -v`)
-- **Total Tests**: **181 passed** in 1.70s
+- **Total Tests**: **183 passed** in 1.79s
 - **Warnings**: 1 deprecation warning from Starlette `TestClient`
 - **Failures**: **0**
 
@@ -275,9 +300,11 @@ Where:
 - `test_7_fail_mastery_activates_remediation_and_locks_downstream`: **PASSED**
 - `test_8_demo_mode_archetypes_remain_intact`: **PASSED**
 - `test_9_process_restart_and_persistence`: **PASSED**
+- `test_10_student_profile_update_and_dashboard_summary`: **PASSED**
+- `test_11_evidence_based_module_completion_verification`: **PASSED**
 
 ### Frontend Suite (`vitest run --run`)
-- **Total Tests**: **20 passed** in 0.95s
+- **Total Tests**: **23 passed** in 1.06s
 - **Test Files**: 1 passed (`src/tests/scholar.test.tsx`)
 - **Failures**: **0**
 
@@ -292,10 +319,10 @@ Executing `npm --prefix frontend run build`:
 
 vite v6.4.6 building for production...
 ✓ 2147 modules transformed.
-dist/index.html                   0.70 kB │ gzip:  0.40 kB
-dist/assets/index-C09qvuap.css    7.72 kB │ gzip:  2.14 kB
-dist/assets/index-CLdXbHca.js   343.55 kB │ gzip: 95.06 kB
-✓ built in 784ms
+dist/index.html                   0.70 kB │ gzip:   0.40 kB
+dist/assets/index-C09qvuap.css    7.72 kB │ gzip:   2.14 kB
+dist/assets/index-DpfKEJgg.js   372.37 kB │ gzip: 100.45 kB
+✓ built in 761ms
 ```
 - TypeScript compilation (`tsc`): **Clean, 0 errors**.
 - Vite production bundle: **Clean, 0 errors**.
@@ -366,8 +393,8 @@ Follow this exact walkthrough during an interview or evaluation demonstration:
 
 ## Verification Sign-Off
 
-- **Backend Tests**: 181/181 passing (`pytest backend/tests/ -v`)
-- **Frontend Tests**: 20/20 passing (`vitest run --run`)
-- **Production Build**: Clean (`vite build` in 784ms)
+- **Backend Tests**: 183/183 passing (`pytest backend/tests/ -v`)
+- **Frontend Tests**: 23/23 passing (`vitest run --run`)
+- **Production Build**: Clean (`vite build` in 761ms)
 - **Database Consistency**: SQLite persistence verified across server restarts
 - **Codebase Integrity**: Zero fake UI state, zero mock progress counters, 100% grounded in implementation.
