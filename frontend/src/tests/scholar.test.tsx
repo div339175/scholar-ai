@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ScholarPage } from "../pages/ScholarPage";
+import { StudentDashboardView } from "../components/StudentDashboardView";
+import { OnboardingFlow } from "../components/OnboardingFlow";
 import { scholarApi, ApiError } from "../api/scholarApi";
 import { GroundedKnowledgePanel } from "../components/GroundedKnowledgePanel";
 import { CurrentActionBanner } from "../components/CurrentActionBanner";
@@ -535,6 +537,328 @@ describe("Scholar AI Frontend Integration Tests", () => {
       expect(screen.getAllByText(/COLLECT_MORE_EVIDENCE/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/INSUFFICIENT_EVIDENCE/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/minimum 5 problem submissions required/i).length).toBeGreaterThan(0);
+    });
+  });
+
+  // 16. Clean Student State Isolation in Dashboard
+  it("renders clean student-facing dashboard with 0.0% completion and 0-day streak without Alex benchmarks", async () => {
+    const mockNewStudentProfile: StudentProfile = {
+      id: "student_new_123",
+      name: "Divakar Maurya",
+      career_goal: "AI/ML Engineer",
+      weekly_hours: 15,
+      current_streak: 0,
+      roadmap_completion: 0.0,
+    };
+
+    const mockNewStudentState: ScholarStudentState = {
+      student_id: "student_new_123",
+      false_progress: {
+        detected: false,
+        index: 0.0,
+        severity: "NONE",
+        triggers: [],
+      },
+      intervention: {
+        required: false,
+        type: "CONTINUE_NORMAL",
+        priority: "LOW",
+        target_topics: [],
+        roadmap_action: "CONTINUE",
+      },
+      mastery: {
+        status: "NO_RECORDED_CHECK",
+        topic: null,
+        decision: null,
+        conceptual_score: null,
+        conceptual_score_source: null,
+        independent_success: null,
+      },
+      roadmap: {
+        action: "CONTINUE_NORMAL",
+        topic: null,
+        evidence_status: "INSUFFICIENT_EVIDENCE",
+      },
+      capability: {
+        standard_readiness_score: 11.3,
+        verified_capability_score: 5.6,
+        readiness_status: "INSUFFICIENT_EVIDENCE",
+        mastery_coverage: 0.0,
+        mastery_confidence_multiplier: 0.5,
+      },
+      evidence_chain: [],
+    };
+
+    const mockNewStudentAction: ScholarNextAction = {
+      student_id: "student_new_123",
+      action: "COLLECT_MORE_EVIDENCE",
+      target_topic: null,
+      reason: "Insufficient behavioral evidence (minimum 5 problem submissions required) to evaluate competence or recommend intervention.",
+      source_components: ["TELEMETRY_SERVICE", "ROADMAP_ADAPTATION"],
+    };
+
+    vi.spyOn(scholarApi, "getStudentProfile").mockResolvedValue(mockNewStudentProfile);
+    vi.spyOn(scholarApi, "getScholarState").mockResolvedValue(mockNewStudentState);
+    vi.spyOn(scholarApi, "getNextAction").mockResolvedValue(mockNewStudentAction);
+    vi.spyOn(scholarApi, "getRoadmap").mockResolvedValue([
+      {
+        id: "node_1",
+        student_id: "student_new_123",
+        title: "Foundations of Arrays & Hashing",
+        topic: "Arrays & Hashing",
+        status: "IN_PROGRESS",
+        sequence: 1,
+        estimated_minutes: 120,
+        is_locked: false,
+        node_type: "NORMAL",
+      },
+      {
+        id: "node_2",
+        student_id: "student_new_123",
+        title: "Two Pointers Technique",
+        topic: "Arrays & Hashing",
+        status: "PENDING",
+        sequence: 2,
+        estimated_minutes: 150,
+        is_locked: true,
+        node_type: "NORMAL",
+      },
+    ]);
+    vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue({
+      total_events: 0,
+      first_attempt_pass_rate: 0.0,
+      hint_dependency_rate: 0.0,
+      average_duration_seconds: 0.0,
+      multi_attempt_count: 0,
+      topic_breakdown: {},
+    });
+
+    render(
+      <StudentDashboardView
+        studentId="student_new_123"
+        isDemoMode={false}
+        onToggleDemoMode={vi.fn()}
+        onSelectStudent={vi.fn()}
+        onBackToLanding={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Divakar Maurya").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("0.0%").length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/0 Day Streak/i).length).toBeGreaterThan(0);
+      expect(screen.getByText("STUDENT MODE")).toBeTruthy();
+      expect(screen.queryByText("Alex Sharma")).toBeNull();
+      expect(screen.queryByText("72.0%")).toBeNull();
+      expect(screen.queryByText("12 Day Streak")).toBeNull();
+    });
+  });
+
+  // 17. Onboarding Flow Persists Student via API
+  it("submits onboarding form and triggers createStudent in SQLite API", async () => {
+    const createSpy = vi.spyOn(scholarApi, "createStudent").mockResolvedValue({
+      id: "student_created_99",
+      name: "Divakar Maurya",
+      career_goal: "Full-Stack Developer",
+      weekly_hours: 10,
+      current_streak: 0,
+      roadmap_completion: 0.0,
+    });
+
+    const onCompleteMock = vi.fn();
+    render(<OnboardingFlow onComplete={onCompleteMock} onCancel={vi.fn()} />);
+
+    // Step 1: Name input
+    const input = screen.getByPlaceholderText("e.g., Divakar Maurya");
+    fireEvent.change(input, { target: { value: "Divakar Maurya" } });
+    fireEvent.click(screen.getByText("Continue"));
+
+    // Step 2: Goal
+    fireEvent.click(screen.getByText("Continue"));
+
+    // Step 3: Experience
+    fireEvent.click(screen.getByText("Continue"));
+
+    // Step 4: Finish & Launch
+    fireEvent.click(screen.getByText("Create Account & Launch Dashboard"));
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith({
+        name: "Divakar Maurya",
+        career_goal: "Full-Stack Developer",
+        weekly_hours: 10,
+        baseline_level: "Intermediate",
+      });
+      expect(onCompleteMock).toHaveBeenCalled();
+    });
+  });
+
+  // 18. Practice tab renders problems and records telemetry
+  it("renders practice problem catalog and posts telemetry upon solving", async () => {
+    const mockProfile: StudentProfile = {
+      id: "student_test_1",
+      name: "Test Student",
+      career_goal: "Full-Stack",
+      weekly_hours: 10,
+      current_streak: 0,
+      roadmap_completion: 0.0,
+    };
+
+    vi.spyOn(scholarApi, "getStudentProfile").mockResolvedValue(mockProfile);
+    vi.spyOn(scholarApi, "getScholarState").mockResolvedValue({
+      student_id: "student_test_1",
+      false_progress: { detected: false, index: 0, severity: "NONE", triggers: [] },
+      intervention: { required: false, type: "CONTINUE_NORMAL", priority: "LOW", target_topics: [], roadmap_action: "CONTINUE" },
+      mastery: { status: "NO_RECORDED_CHECK", topic: null, decision: null, conceptual_score: null, conceptual_score_source: null, independent_success: null },
+      roadmap: { action: "CONTINUE_NORMAL", topic: null, evidence_status: "INSUFFICIENT_EVIDENCE" },
+      capability: { standard_readiness_score: 10, verified_capability_score: 5, readiness_status: "INSUFFICIENT_EVIDENCE", mastery_coverage: 0, mastery_confidence_multiplier: 0.5 },
+      evidence_chain: [],
+    });
+    vi.spyOn(scholarApi, "getNextAction").mockResolvedValue({
+      student_id: "student_test_1",
+      action: "COLLECT_MORE_EVIDENCE",
+      target_topic: null,
+      reason: "Need 5 problems.",
+      source_components: [],
+    });
+    vi.spyOn(scholarApi, "getRoadmap").mockResolvedValue([]);
+    vi.spyOn(scholarApi, "getProblems").mockResolvedValue([
+      { id: "prob_arr_01", title: "Two Sum", topic: "Arrays & Hashing", difficulty: "Easy" },
+    ]);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+
+    const recordSpy = vi.spyOn(scholarApi, "recordTelemetry").mockResolvedValue({});
+
+    render(
+      <StudentDashboardView
+        studentId="student_test_1"
+        isDemoMode={false}
+        onToggleDemoMode={vi.fn()}
+        onSelectStudent={vi.fn()}
+        onBackToLanding={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading your personalized/i)).toBeNull();
+    });
+
+    // Switch to Practice tab
+    const practiceTabBtn = screen.getByRole("button", { name: /^Practice$/i });
+    fireEvent.click(practiceTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Two Sum")).toBeTruthy();
+    });
+
+    // Click Solve Problem
+    fireEvent.click(screen.getByText("Solve Problem"));
+
+    // Click Autonomous Solve
+    await waitFor(() => {
+      expect(screen.getByText("Autonomous Solve (1 Attempt, 0 Hints)")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("Autonomous Solve (1 Attempt, 0 Hints)"));
+
+    await waitFor(() => {
+      expect(recordSpy).toHaveBeenCalledWith("student_test_1", {
+        problem_id: "prob_arr_01",
+        topic: "Arrays & Hashing",
+        difficulty: "Easy",
+        submission_count: 1,
+        successful: true,
+        first_attempt_pass: true,
+        hints_requested: 0,
+        active_coding_duration_seconds: 720,
+      });
+    });
+  });
+
+  // 19. Roadmap node completion
+  it("invokes completeRoadmapNode when completing in-progress module in Roadmap tab", async () => {
+    const mockProfile: StudentProfile = {
+      id: "student_test_1",
+      name: "Test Student",
+      career_goal: "Full-Stack",
+      weekly_hours: 10,
+      current_streak: 0,
+      roadmap_completion: 0.0,
+    };
+
+    vi.spyOn(scholarApi, "getStudentProfile").mockResolvedValue(mockProfile);
+    vi.spyOn(scholarApi, "getScholarState").mockResolvedValue({
+      student_id: "student_test_1",
+      false_progress: { detected: false, index: 0, severity: "NONE", triggers: [] },
+      intervention: { required: false, type: "CONTINUE_NORMAL", priority: "LOW", target_topics: [], roadmap_action: "CONTINUE" },
+      mastery: { status: "NO_RECORDED_CHECK", topic: null, decision: null, conceptual_score: null, conceptual_score_source: null, independent_success: null },
+      roadmap: { action: "CONTINUE_NORMAL", topic: null, evidence_status: "INSUFFICIENT_EVIDENCE" },
+      capability: { standard_readiness_score: 10, verified_capability_score: 5, readiness_status: "INSUFFICIENT_EVIDENCE", mastery_coverage: 0, mastery_confidence_multiplier: 0.5 },
+      evidence_chain: [],
+    });
+    vi.spyOn(scholarApi, "getNextAction").mockResolvedValue({
+      student_id: "student_test_1",
+      action: "COLLECT_MORE_EVIDENCE",
+      target_topic: null,
+      reason: "Need 5 problems.",
+      source_components: [],
+    });
+    vi.spyOn(scholarApi, "getRoadmap").mockResolvedValue([
+      {
+        id: "node_array_01",
+        student_id: "student_test_1",
+        title: "Foundations of Arrays & Hashing",
+        topic: "Arrays & Hashing",
+        status: "IN_PROGRESS",
+        sequence: 1,
+        estimated_minutes: 120,
+        is_locked: false,
+        node_type: "NORMAL",
+      },
+    ]);
+    vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+
+    const completeSpy = vi.spyOn(scholarApi, "completeRoadmapNode").mockResolvedValue([
+      {
+        id: "node_array_01",
+        student_id: "student_test_1",
+        title: "Foundations of Arrays & Hashing",
+        topic: "Arrays & Hashing",
+        status: "COMPLETED",
+        sequence: 1,
+        estimated_minutes: 120,
+        is_locked: false,
+        node_type: "NORMAL",
+      },
+    ]);
+
+    render(
+      <StudentDashboardView
+        studentId="student_test_1"
+        isDemoMode={false}
+        onToggleDemoMode={vi.fn()}
+        onSelectStudent={vi.fn()}
+        onBackToLanding={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading your personalized/i)).toBeNull();
+    });
+
+    // Switch to Roadmap tab
+    const roadmapTabBtn = screen.getByRole("button", { name: /^Roadmap$/i });
+    fireEvent.click(roadmapTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Complete Module")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText("Complete Module"));
+
+    await waitFor(() => {
+      expect(completeSpy).toHaveBeenCalledWith("student_test_1", "node_array_01");
     });
   });
 });

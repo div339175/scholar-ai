@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from app.config import settings
 from app.database import engine, Base, SessionLocal
 from app.models import *  # Ensure all models are registered
-from app.routers import dashboard_router, telemetry_router, roadmap_router, scholar_router
+from app.routers import dashboard_router, telemetry_router, roadmap_router, scholar_router, problem_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,3 +49,4 @@ app.include_router(dashboard_router, prefix=settings.API_V1_PREFIX)
 app.include_router(telemetry_router, prefix=settings.API_V1_PREFIX)
 app.include_router(roadmap_router, prefix=settings.API_V1_PREFIX)
 app.include_router(scholar_router, prefix=settings.API_V1_PREFIX)
+app.include_router(problem_router, prefix=settings.API_V1_PREFIX)

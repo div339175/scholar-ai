@@ -18,6 +18,16 @@ def get_student_telemetry(student_id: str, limit: int = 100, db: Session = Depen
         )
     return TelemetryService.get_student_telemetry(db, student_id, limit=limit)
 
+@router.get("/{student_id}/telemetry/metrics")
+def get_student_telemetry_metrics(student_id: str, db: Session = Depends(get_db)):
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student with ID '{student_id}' not found",
+        )
+    return TelemetryService.get_telemetry_metrics(db, student_id)
+
 @router.post("/{student_id}/telemetry", response_model=TelemetryResponse, status_code=status.HTTP_201_CREATED)
 def record_student_telemetry(student_id: str, payload: TelemetryCreate, db: Session = Depends(get_db)):
     student = db.query(Student).filter(Student.id == student_id).first()

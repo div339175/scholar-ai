@@ -24,12 +24,15 @@ import {
   CheckCircle2,
   Lock,
   AlertTriangle,
-  Play,
   ExternalLink,
   ChevronDown,
   ChevronUp,
   Sparkles,
   ShieldCheck,
+  Check,
+  X,
+  Loader2,
+  Zap,
 } from "lucide-react";
 
 interface Props {
@@ -65,6 +68,37 @@ export const StudentDashboardView: React.FC<Props> = ({
   const [isMasteryModalOpen, setIsMasteryModalOpen] = useState<boolean>(false);
   const [showEvidencePill, setShowEvidencePill] = useState<boolean>(false);
   const [error, setError] = useState<{ status: number; message: string } | null>(null);
+
+  // Real Practice & Telemetry States
+  const [telemetryMetrics, setTelemetryMetrics] = useState<{
+    total_events: number;
+    first_attempt_pass_rate: number;
+    hint_dependency_rate: number;
+    average_duration_seconds: number;
+    multi_attempt_count: number;
+    topic_breakdown: Record<string, any>;
+  } | null>(null);
+
+  const [problems, setProblems] = useState<Array<{
+    id: string;
+    title: string;
+    topic: string;
+    difficulty: string;
+  }>>([]);
+
+  const [selectedTopicFilter, setSelectedTopicFilter] = useState<string>("All");
+  const [solvingProblem, setSolvingProblem] = useState<{
+    id: string;
+    title: string;
+    topic: string;
+    difficulty: string;
+  } | null>(null);
+  const [customAttempts, setCustomAttempts] = useState<number>(1);
+  const [customHints, setCustomHints] = useState<number>(0);
+  const [customDuration, setCustomDuration] = useState<number>(15);
+  const [isSubmittingSolve, setIsSubmittingSolve] = useState<boolean>(false);
+  const [solveNotification, setSolveNotification] = useState<string | null>(null);
+  const [isCompletingNodeId, setIsCompletingNodeId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -104,12 +138,20 @@ export const StudentDashboardView: React.FC<Props> = ({
         setKnowledge([]);
       }
 
-      // Fetch roadmap nodes for visual timeline
+      // Fetch roadmap nodes, problems, and telemetry metrics in parallel
       try {
-        const nodes = await scholarApi.getRoadmap(studentId);
+        const [nodes, probs, metrics] = await Promise.all([
+          scholarApi.getRoadmap(studentId).catch(() => []),
+          scholarApi.getProblems().catch(() => []),
+          scholarApi.getTelemetryMetrics(studentId).catch(() => null),
+        ]);
         setRoadmapNodes(nodes || []);
+        setProblems(probs || []);
+        setTelemetryMetrics(metrics);
       } catch {
         setRoadmapNodes([]);
+        setProblems([]);
+        setTelemetryMetrics(null);
       }
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -181,21 +223,61 @@ export const StudentDashboardView: React.FC<Props> = ({
 
   const handleAskWhy = () => {
     handleSendMessage("Why are you asking me to do this?");
-    setActiveTab("scholar");
   };
 
   const handleExplainTopic = (topic: string) => {
-    handleSendMessage(`Explain ${topic}`);
-    setActiveTab("scholar");
+    handleSendMessage(`Explain the core invariants and concepts for ${topic}.`);
   };
 
-  // Student-friendly terminology translations
+  const handleCompleteNode = async (nodeId: string) => {
+    setIsCompletingNodeId(nodeId);
+    try {
+      const updatedNodes = await scholarApi.completeRoadmapNode(studentId, nodeId);
+      setRoadmapNodes(updatedNodes || []);
+      await loadData();
+    } catch (err) {
+      console.error("Failed to complete roadmap node:", err);
+    } finally {
+      setIsCompletingNodeId(null);
+    }
+  };
+
+  const handleExecuteSolve = async (
+    problem: { id: string; title: string; topic: string; difficulty: string },
+    submissions: number,
+    hints: number,
+    durationMins: number
+  ) => {
+    setIsSubmittingSolve(true);
+    try {
+      await scholarApi.recordTelemetry(studentId, {
+        problem_id: problem.id,
+        topic: problem.topic,
+        difficulty: problem.difficulty,
+        submission_count: submissions,
+        successful: true,
+        first_attempt_pass: submissions === 1 && hints === 0,
+        hints_requested: hints,
+        active_coding_duration_seconds: durationMins * 60,
+      });
+
+      setSolvingProblem(null);
+      setSolveNotification(`Logged solution for "${problem.title}"! Real telemetry persisted in SQLite.`);
+      setTimeout(() => setSolveNotification(null), 5000);
+      await loadData();
+    } catch (err) {
+      console.error("Failed to record problem telemetry:", err);
+    } finally {
+      setIsSubmittingSolve(false);
+    }
+  };
+
   const getFriendlyActionTitle = (action: string, topic?: string | null) => {
     switch (action) {
       case "COMPLETE_MASTERY_CHECK":
-        return topic ? `Strengthen & Verify ${topic}` : "Verify Conceptual Mastery";
+        return topic ? `Mastery Check: ${topic}` : "Concept Mastery Verification";
       case "COMPLETE_REMEDIATION":
-        return topic ? `Remediate ${topic} Concepts` : "Review Target Concepts";
+        return topic ? `Remediation Sprint: ${topic}` : "Targeted Concept Remediation";
       case "RESUME_ROADMAP":
         return "Resume Forward Roadmap Progression";
       case "CONTINUE_LEARNING":
@@ -292,31 +374,40 @@ export const StudentDashboardView: React.FC<Props> = ({
   const effectiveGoal = userGoal || profile?.career_goal || "Full-Stack Developer";
   const effectiveWeekly = userCommitment || `${profile?.weekly_hours || 10} hours / week`;
 
+  // Filter problems for practice tab
+  const filteredProblems = selectedTopicFilter === "All"
+    ? problems
+    : problems.filter((p) => p.topic.toLowerCase().includes(selectedTopicFilter.toLowerCase()));
+
+  const distinctTopics = ["All", "Arrays & Hashing", "Sliding Window", "Dynamic Programming", "Recursion", "Graph Traversal"];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
       {/* Top Demo Mode Banner (when active) */}
-      {isDemoMode && (
+      {isDemoMode ? (
         <div
           style={{
             background: "linear-gradient(90deg, #1e1b4b 0%, #1e293b 100%)",
             borderBottom: "1px solid #4338ca",
-            padding: "0.5rem 1.5rem",
+            padding: "0.6rem 1.5rem",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             fontSize: "0.82rem",
             color: "#c7d2fe",
+            flexWrap: "wrap",
+            gap: "0.5rem",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <span className="badge badge-info" style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem" }}>
-              DEMO MODE
+              EVALUATOR DEMO MODE
             </span>
-            <span>Using benchmark student profiles for evaluation.</span>
+            <span>Viewing isolated benchmark scenario profiles.</span>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <span style={{ color: "var(--text-muted)" }}>Benchmark Student:</span>
+            <span style={{ color: "var(--text-muted)" }}>Benchmark Archetype:</span>
             <select
               value={studentId}
               onChange={(e) => onSelectStudent(e.target.value)}
@@ -330,14 +421,44 @@ export const StudentDashboardView: React.FC<Props> = ({
               }}
             >
               <option value="student_alex">Alex Sharma (False Progress Scenario)</option>
-              <option value="student_priya">Priya Mehta (Autonomous Progression Scenario)</option>
-              <option value="student_marcus">Marcus (Insufficient Evidence Scenario)</option>
+              <option value="student_priya">Priya Mehta (Genuine Mastery Scenario)</option>
+              <option value="student_marcus">Marcus Vance (Sparse Evidence Scenario)</option>
             </select>
             <button
               onClick={onToggleDemoMode}
-              style={{ background: "transparent", color: "#a5b4fc", fontSize: "0.78rem", textDecoration: "underline" }}
+              style={{ background: "transparent", color: "#a5b4fc", fontSize: "0.78rem", textDecoration: "underline", cursor: "pointer" }}
             >
               Return to Student Mode
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            background: "rgba(16, 24, 39, 0.9)",
+            borderBottom: "1px solid var(--border-subtle)",
+            padding: "0.45rem 1.5rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: "0.8rem",
+            color: "var(--text-secondary)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span className="badge badge-success" style={{ fontSize: "0.68rem" }}>
+              STUDENT MODE
+            </span>
+            <span>Active Student: <strong>{profile?.name}</strong> (ID: <code style={{ fontSize: "0.75rem" }}>{profile?.id}</code>)</span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <button
+              onClick={onToggleDemoMode}
+              className="btn-secondary"
+              style={{ fontSize: "0.75rem", padding: "0.2rem 0.6rem" }}
+            >
+              Switch to Evaluator Demo Mode
             </button>
           </div>
         </div>
@@ -410,17 +531,6 @@ export const StudentDashboardView: React.FC<Props> = ({
 
         {/* User Badge & Mode Switcher */}
         <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-          {!isDemoMode && (
-            <button
-              onClick={onToggleDemoMode}
-              className="btn-secondary"
-              style={{ fontSize: "0.78rem", padding: "0.35rem 0.75rem", display: "inline-flex", alignItems: "center", gap: "0.35rem" }}
-            >
-              <Play size={12} color="#818cf8" />
-              <span>Demo Mode</span>
-            </button>
-          )}
-
           <div
             style={{
               display: "flex",
@@ -465,10 +575,10 @@ export const StudentDashboardView: React.FC<Props> = ({
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
               <div>
                 <h1 style={{ fontSize: "1.7rem", fontWeight: 800, letterSpacing: "-0.02em" }}>
-                  Good evening, {profile?.name?.split(" ")[0] || "Student"}
+                  Welcome, {profile?.name?.split(" ")[0] || "Student"}
                 </h1>
                 <div style={{ fontSize: "0.88rem", color: "var(--text-secondary)", marginTop: "0.2rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                  <span>Track: <strong>{effectiveGoal}</strong></span>
+                  <span>Goal: <strong>{effectiveGoal}</strong></span>
                   <span>•</span>
                   <span>Commitment: <strong>{effectiveWeekly}</strong></span>
                 </div>
@@ -477,7 +587,7 @@ export const StudentDashboardView: React.FC<Props> = ({
               <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", color: "#fbbf24", fontSize: "0.9rem", fontWeight: 600 }}>
                   <Flame size={18} />
-                  <span>{profile?.current_streak || 0} Day Streak</span>
+                  <span>{profile?.current_streak ?? 0} Day Streak</span>
                 </div>
               </div>
             </div>
@@ -536,6 +646,17 @@ export const StudentDashboardView: React.FC<Props> = ({
                     >
                       <Award size={16} />
                       <span>Start Mastery Check</span>
+                    </button>
+                  )}
+
+                  {nextAction.action === "COLLECT_MORE_EVIDENCE" && (
+                    <button
+                      onClick={() => setActiveTab("practice")}
+                      className="btn-primary"
+                      style={{ padding: "0.75rem 1.4rem", fontSize: "0.92rem", display: "inline-flex", alignItems: "center", gap: "0.45rem" }}
+                    >
+                      <Code2 size={16} />
+                      <span>Go to Practice Problems</span>
                     </button>
                   )}
 
@@ -605,7 +726,7 @@ export const StudentDashboardView: React.FC<Props> = ({
                     <Layers size={16} color="#818cf8" />
                   </div>
                   <div style={{ fontSize: "1.75rem", fontWeight: 800, color: "#f9fafb" }}>
-                    {(profile?.roadmap_completion || state.roadmap.topic ? profile?.roadmap_completion || 72 : 0).toFixed(1)}%
+                    {(profile?.roadmap_completion ?? 0).toFixed(1)}%
                   </div>
                   <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
                     Status: <strong style={{ color: state.roadmap.action === "PAUSE_ADVANCEMENT" ? "#f87171" : "#34d399" }}>
@@ -638,7 +759,7 @@ export const StudentDashboardView: React.FC<Props> = ({
                     <Flame size={16} color="#fbbf24" />
                   </div>
                   <div style={{ fontSize: "1.75rem", fontWeight: 800, color: "#f9fafb" }}>
-                    {profile?.current_streak || 0} Days
+                    {profile?.current_streak ?? 0} Days
                   </div>
                   <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
                     Consistency Factor: <strong>Active</strong>
@@ -656,7 +777,7 @@ export const StudentDashboardView: React.FC<Props> = ({
                 </div>
                 <button
                   onClick={() => setActiveTab("roadmap")}
-                  style={{ background: "transparent", color: "#818cf8", fontSize: "0.82rem", display: "inline-flex", alignItems: "center", gap: "0.25rem" }}
+                  style={{ background: "transparent", color: "#818cf8", fontSize: "0.82rem", display: "inline-flex", alignItems: "center", gap: "0.25rem", cursor: "pointer" }}
                 >
                   <span>View Full Roadmap</span>
                   <ExternalLink size={13} />
@@ -719,7 +840,7 @@ export const StudentDashboardView: React.FC<Props> = ({
             <div>
               <h1 style={{ fontSize: "1.6rem", fontWeight: 800 }}>Your Learning Roadmap</h1>
               <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginTop: "0.2rem" }}>
-                Modules adapt dynamically based on your verified conceptual competence.
+                Modules adapt dynamically based on verified conceptual competence and behavioral telemetry.
               </p>
             </div>
 
@@ -746,7 +867,9 @@ export const StudentDashboardView: React.FC<Props> = ({
             <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
               {roadmapNodes.map((node) => {
                 const isCompleted = node.status === "COMPLETED";
+                const isInProgress = node.status === "IN_PROGRESS";
                 const isFocus = node.topic === nextAction?.target_topic;
+                const isCompletingThis = isCompletingNodeId === node.id;
 
                 return (
                   <div
@@ -757,7 +880,7 @@ export const StudentDashboardView: React.FC<Props> = ({
                       alignItems: "center",
                       justifyContent: "space-between",
                       padding: "1rem 1.25rem",
-                      borderLeft: `4px solid ${isCompleted ? "#34d399" : isFocus ? "#fbbf24" : "var(--border-subtle)"}`,
+                      borderLeft: `4px solid ${isCompleted ? "#34d399" : isInProgress ? "#6366f1" : isFocus ? "#fbbf24" : "var(--border-subtle)"}`,
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
@@ -773,11 +896,32 @@ export const StudentDashboardView: React.FC<Props> = ({
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                      {isInProgress && (
+                        <button
+                          onClick={() => handleCompleteNode(node.id)}
+                          disabled={isCompletingThis}
+                          className="btn-primary"
+                          style={{ fontSize: "0.75rem", padding: "0.35rem 0.75rem" }}
+                        >
+                          {isCompletingThis ? (
+                            <>
+                              <Loader2 size={13} className="animate-spin" />
+                              <span>Saving...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check size={13} />
+                              <span>Complete Module</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+
                       <span
-                        className={`badge ${isCompleted ? "badge-success" : isFocus ? "badge-warning" : "badge-neutral"}`}
+                        className={`badge ${isCompleted ? "badge-success" : isInProgress ? "badge-info" : isFocus ? "badge-warning" : "badge-neutral"}`}
                         style={{ fontSize: "0.75rem" }}
                       >
-                        {isCompleted ? "Completed" : isFocus ? "Verification Needed" : "Locked"}
+                        {isCompleted ? "Completed" : isInProgress ? "In Progress" : isFocus ? "Verification Needed" : "Locked"}
                       </span>
                     </div>
                   </div>
@@ -788,17 +932,60 @@ export const StudentDashboardView: React.FC<Props> = ({
         )}
 
         {/* ============================================================ */}
-        {/* TAB 3: PRACTICE                                              */}
+        {/* TAB 3: PRACTICE (REAL CATALOG & TELEMETRY SUBMISSION)        */}
         {/* ============================================================ */}
         {activeTab === "practice" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
             <div>
               <h1 style={{ fontSize: "1.6rem", fontWeight: 800 }}>Practice Problem Modules</h1>
               <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginTop: "0.2rem" }}>
-                Solve algorithmic patterns independently to strengthen your verified capability.
+                Solve algorithmic patterns independently to generate real telemetry and calibrate verified capability.
               </p>
             </div>
 
+            {/* Notification alert */}
+            {solveNotification && (
+              <div
+                style={{
+                  padding: "0.85rem 1.25rem",
+                  background: "rgba(16, 185, 129, 0.15)",
+                  border: "1px solid rgba(16, 185, 129, 0.35)",
+                  borderRadius: "var(--radius-sm)",
+                  color: "#6ee7b7",
+                  fontSize: "0.88rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                }}
+              >
+                <CheckCircle2 size={18} />
+                <span>{solveNotification}</span>
+              </div>
+            )}
+
+            {/* Topic Filter Pills */}
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              {distinctTopics.map((top) => (
+                <button
+                  key={top}
+                  onClick={() => setSelectedTopicFilter(top)}
+                  style={{
+                    padding: "0.4rem 0.85rem",
+                    borderRadius: "9999px",
+                    background: selectedTopicFilter === top ? "#6366f1" : "var(--bg-secondary)",
+                    color: selectedTopicFilter === top ? "#fff" : "var(--text-secondary)",
+                    border: "1px solid var(--border-subtle)",
+                    fontSize: "0.8rem",
+                    cursor: "pointer",
+                    fontWeight: 500,
+                  }}
+                >
+                  {top}
+                </button>
+              ))}
+            </div>
+
+            {/* Real Catalog Problems Grid */}
             <div
               style={{
                 display: "grid",
@@ -806,62 +993,103 @@ export const StudentDashboardView: React.FC<Props> = ({
                 gap: "1.25rem",
               }}
             >
-              {[
-                { topic: "Sliding Window", problems: 8, status: "Focus Topic", icon: "🪟" },
-                { topic: "Dynamic Programming", problems: 10, status: "Upcoming", icon: "⚡" },
-                { topic: "Recursion & Backtracking", problems: 8, status: "Upcoming", icon: "🔄" },
-                { topic: "Graph Traversal", problems: 8, status: "Upcoming", icon: "🌐" },
-                { topic: "Arrays & Hashing", problems: 6, status: "Completed", icon: "📦" },
-              ].map((p, idx) => (
-                <div key={idx} className="card" style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                  <div style={{ fontSize: "1.5rem" }}>{p.icon}</div>
-                  <h3 style={{ fontSize: "1.05rem", fontWeight: 700 }}>{p.topic}</h3>
-                  <div style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                    {p.problems} catalog problems available
-                  </div>
-                  <span
-                    className={`badge ${p.status === "Focus Topic" ? "badge-warning" : p.status === "Completed" ? "badge-success" : "badge-neutral"}`}
-                    style={{ alignSelf: "flex-start", marginTop: "0.5rem" }}
+              {filteredProblems.map((prob) => {
+                const diffBadgeClass =
+                  prob.difficulty === "Easy"
+                    ? "badge-success"
+                    : prob.difficulty === "Medium"
+                    ? "badge-warning"
+                    : "badge-danger";
+
+                return (
+                  <div
+                    key={prob.id}
+                    className="card"
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      gap: "0.85rem",
+                      padding: "1.25rem",
+                    }}
                   >
-                    {p.status}
-                  </span>
-                </div>
-              ))}
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.4rem" }}>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{prob.topic}</span>
+                        <span className={`badge ${diffBadgeClass}`} style={{ fontSize: "0.7rem" }}>
+                          {prob.difficulty}
+                        </span>
+                      </div>
+                      <h3 style={{ fontSize: "1.05rem", fontWeight: 700, color: "#f9fafb" }}>{prob.title}</h3>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setSolvingProblem(prob);
+                        setCustomAttempts(1);
+                        setCustomHints(0);
+                        setCustomDuration(15);
+                      }}
+                      className="btn-primary"
+                      style={{ fontSize: "0.82rem", padding: "0.5rem 1rem", width: "100%", justifyContent: "center" }}
+                    >
+                      <Code2 size={14} />
+                      <span>Solve Problem</span>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
         {/* ============================================================ */}
-        {/* TAB 4: PROJECTS                                              */}
+        {/* TAB 4: PROJECTS (HONEST CURRICULUM MILESTONES)                */}
         {/* ============================================================ */}
         {activeTab === "projects" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
             <div>
-              <h1 style={{ fontSize: "1.6rem", fontWeight: 800 }}>Portfolio Capstone Projects</h1>
+              <h1 style={{ fontSize: "1.6rem", fontWeight: 800 }}>Portfolio Capstone Milestones</h1>
               <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginTop: "0.2rem" }}>
-                Demonstrate end-to-end full-stack competence for placement portfolios.
+                Future placement project milestones unlocked upon verifying foundational roadmap competence.
               </p>
+            </div>
+
+            <div
+              style={{
+                padding: "1rem 1.25rem",
+                borderRadius: "var(--radius-sm)",
+                background: "rgba(99, 102, 241, 0.08)",
+                border: "1px solid rgba(99, 102, 241, 0.2)",
+                fontSize: "0.85rem",
+                color: "#c7d2fe",
+                lineHeight: 1.5,
+              }}
+            >
+              <strong>Architecture Transparency Notice:</strong> The StepCode prototype focuses on the Scholar AI Competence Engine
+              (behavioral telemetry, False Progress Detection, interventions, conceptual mastery verification, and adaptive roadmap mutations).
+              Capstone synthesis milestones unlock after preceding curriculum nodes are completed.
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
               <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
-                  <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>Full-Stack REST & Async Microservices</h3>
+                  <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>Algorithmic Backend API Integration</h3>
                   <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: "0.25rem" }}>
-                    Build scalable FastAPI endpoints with PostgreSQL, Redis caching, and Docker containers.
+                    Integrate verified algorithmic modules into structured REST endpoints with server-side validation.
                   </p>
                 </div>
-                <span className="badge badge-neutral">Locked (Requires Graphs)</span>
+                <span className="badge badge-neutral">Future Milestone (Locked)</span>
               </div>
 
               <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
-                  <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>System Design & Distributed Capstone</h3>
+                  <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>System Architecture & Verification Capstone</h3>
                   <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: "0.25rem" }}>
-                    Architect a high-throughput event streaming platform with rate limiting and database partitioning.
+                    Capstone synthesis requiring verified independent mastery across data structures, dynamic programming, and graph traversal.
                   </p>
                 </div>
-                <span className="badge badge-neutral">Locked</span>
+                <span className="badge badge-neutral">Future Milestone (Locked)</span>
               </div>
             </div>
           </div>
@@ -898,14 +1126,14 @@ export const StudentDashboardView: React.FC<Props> = ({
         )}
 
         {/* ============================================================ */}
-        {/* TAB 6: INSIGHTS (EVALUATOR & DEEP METRICS)                  */}
+        {/* TAB 6: INSIGHTS (REAL EVALUATOR & DEEP METRICS)              */}
         {/* ============================================================ */}
         {activeTab === "insights" && state && (
           <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem" }}>
             <div>
               <h1 style={{ fontSize: "1.6rem", fontWeight: 800 }}>Scholar Learning Insights</h1>
               <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginTop: "0.2rem" }}>
-                Deep diagnostic telemetry, False Progress Index breakdown, and capability calibration formulas.
+                Empirical diagnostic telemetry, False Progress Index breakdown, and capability calibration formulas.
               </p>
             </div>
 
@@ -918,7 +1146,7 @@ export const StudentDashboardView: React.FC<Props> = ({
                 Understanding Your Verified Capability Score
               </h3>
               <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", lineHeight: 1.55, marginBottom: "1.25rem" }}>
-                Standard platforms only look at roadmap completion ({profile?.roadmap_completion || 72}%) and streaks, giving a surface readiness of{" "}
+                Standard platforms only look at roadmap completion ({(profile?.roadmap_completion ?? 0).toFixed(1)}%) and streaks, giving a surface readiness of{" "}
                 <strong>{state.capability.standard_readiness_score.toFixed(1)}</strong>. Scholar AI calculates your{" "}
                 <strong>Verified Capability Score ({state.capability.verified_capability_score.toFixed(1)})</strong> by weighting activity against
                 verified conceptual mastery coverage.
@@ -958,49 +1186,93 @@ export const StudentDashboardView: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Behavioral Telemetry Signals Breakdown */}
+            {/* Behavioral Telemetry Signals Breakdown (REAL METRICS) */}
             <div className="card">
-              <h3 style={{ fontSize: "1.15rem", fontWeight: 700, marginBottom: "1rem" }}>
-                Behavioral Telemetry Diagnostics
-              </h3>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-                  gap: "1rem",
-                }}
-              >
-                <div style={{ background: "var(--bg-secondary)", padding: "1rem", borderRadius: "var(--radius-sm)" }}>
-                  <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Hint Reliance Rate</div>
-                  <div style={{ fontSize: "1.4rem", fontWeight: 700, marginTop: "0.2rem", color: state.false_progress.detected ? "#f87171" : "#34d399" }}>
-                    {state.false_progress.detected ? "77.5%" : "8.6%"}
-                  </div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-                    Threshold: &gt; 50% triggers Hint Crutch
-                  </div>
-                </div>
-
-                <div style={{ background: "var(--bg-secondary)", padding: "1rem", borderRadius: "var(--radius-sm)" }}>
-                  <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Independent Solve Rate</div>
-                  <div style={{ fontSize: "1.4rem", fontWeight: 700, marginTop: "0.2rem", color: state.false_progress.detected ? "#f87171" : "#34d399" }}>
-                    {state.false_progress.detected ? "20.0%" : "85.7%"}
-                  </div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-                    Threshold: &lt; 40% triggers Low Independence
-                  </div>
-                </div>
-
-                <div style={{ background: "var(--bg-secondary)", padding: "1rem", borderRadius: "var(--radius-sm)" }}>
-                  <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Retry Submissions Rate</div>
-                  <div style={{ fontSize: "1.4rem", fontWeight: 700, marginTop: "0.2rem", color: state.false_progress.detected ? "#f87171" : "#34d399" }}>
-                    {state.false_progress.detected ? "80.0%" : "15.0%"}
-                  </div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-                    Threshold: &gt; 45% triggers Brute Force
-                  </div>
-                </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>
+                  Behavioral Telemetry Diagnostics
+                </h3>
+                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                  Total Events: <strong>{telemetryMetrics?.total_events ?? 0}</strong>
+                </span>
               </div>
+
+              {telemetryMetrics && telemetryMetrics.total_events > 0 ? (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                    gap: "1rem",
+                  }}
+                >
+                  <div style={{ background: "var(--bg-secondary)", padding: "1rem", borderRadius: "var(--radius-sm)" }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Hint Reliance Rate</div>
+                    <div
+                      style={{
+                        fontSize: "1.4rem",
+                        fontWeight: 700,
+                        marginTop: "0.2rem",
+                        color: telemetryMetrics.hint_dependency_rate > 0.5 ? "#f87171" : "#34d399",
+                      }}
+                    >
+                      {(telemetryMetrics.hint_dependency_rate * 100).toFixed(1)}%
+                    </div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                      Threshold: &gt; 50% triggers Hint Crutch
+                    </div>
+                  </div>
+
+                  <div style={{ background: "var(--bg-secondary)", padding: "1rem", borderRadius: "var(--radius-sm)" }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Independent Solve Rate</div>
+                    <div
+                      style={{
+                        fontSize: "1.4rem",
+                        fontWeight: 700,
+                        marginTop: "0.2rem",
+                        color: telemetryMetrics.first_attempt_pass_rate < 0.4 ? "#f87171" : "#34d399",
+                      }}
+                    >
+                      {(telemetryMetrics.first_attempt_pass_rate * 100).toFixed(1)}%
+                    </div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                      Threshold: &lt; 40% triggers Low Independence
+                    </div>
+                  </div>
+
+                  <div style={{ background: "var(--bg-secondary)", padding: "1rem", borderRadius: "var(--radius-sm)" }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Retry Submissions Rate</div>
+                    <div
+                      style={{
+                        fontSize: "1.4rem",
+                        fontWeight: 700,
+                        marginTop: "0.2rem",
+                        color:
+                          telemetryMetrics.multi_attempt_count / telemetryMetrics.total_events > 0.45
+                            ? "#f87171"
+                            : "#34d399",
+                      }}
+                    >
+                      {((telemetryMetrics.multi_attempt_count / telemetryMetrics.total_events) * 100).toFixed(1)}%
+                    </div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                      Threshold: &gt; 45% triggers Brute Force
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    padding: "1.25rem",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--bg-secondary)",
+                    color: "var(--text-muted)",
+                    fontSize: "0.88rem",
+                    textAlign: "center",
+                  }}
+                >
+                  No problem telemetry recorded yet for this student. Complete practice problems in the Practice tab to establish your behavioral baseline.
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1024,6 +1296,13 @@ export const StudentDashboardView: React.FC<Props> = ({
               </div>
 
               <div>
+                <label style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Student ID</label>
+                <div style={{ fontSize: "0.9rem", fontFamily: "var(--font-mono)", color: "#818cf8", marginTop: "0.15rem" }}>
+                  {profile?.id}
+                </div>
+              </div>
+
+              <div>
                 <label style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Career Goal</label>
                 <div style={{ fontSize: "1rem", fontWeight: 600, marginTop: "0.15rem" }}>{effectiveGoal}</div>
               </div>
@@ -1034,6 +1313,20 @@ export const StudentDashboardView: React.FC<Props> = ({
               </div>
 
               <div>
+                <label style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Roadmap Progress</label>
+                <div style={{ fontSize: "1rem", fontWeight: 600, marginTop: "0.15rem" }}>
+                  {(profile?.roadmap_completion ?? 0).toFixed(1)}%
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>Consistency Streak</label>
+                <div style={{ fontSize: "1rem", fontWeight: 600, marginTop: "0.15rem" }}>
+                  {profile?.current_streak ?? 0} Days
+                </div>
+              </div>
+
+              <div style={{ paddingTop: "0.5rem", borderTop: "1px solid var(--border-subtle)" }}>
                 <label style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>System Mode</label>
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginTop: "0.4rem" }}>
                   <button
@@ -1048,10 +1341,199 @@ export const StudentDashboardView: React.FC<Props> = ({
                   </span>
                 </div>
               </div>
+
+              <div style={{ paddingTop: "0.5rem" }}>
+                <button
+                  onClick={onBackToLanding}
+                  className="btn-secondary"
+                  style={{ fontSize: "0.85rem", width: "100%", justifyContent: "center" }}
+                >
+                  Create a New Student Profile
+                </button>
+              </div>
             </div>
           </div>
         )}
       </main>
+
+      {/* Interactive Practice Solving Modal */}
+      {solvingProblem && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: "1.5rem",
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              width: "100%",
+              maxWidth: "580px",
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-subtle)",
+              padding: "2rem",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <Code2 size={20} color="#818cf8" />
+                <h2 style={{ fontSize: "1.25rem", fontWeight: 700 }}>Solve: {solvingProblem.title}</h2>
+              </div>
+              <button
+                onClick={() => setSolvingProblem(null)}
+                style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "1.5rem" }}>
+              Topic: <strong>{solvingProblem.topic}</strong> • Difficulty: <strong>{solvingProblem.difficulty}</strong>
+            </div>
+
+            <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", marginBottom: "1.25rem" }}>
+              Choose a submission style to record real telemetry into SQLite:
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1.5rem" }}>
+              <button
+                onClick={() => handleExecuteSolve(solvingProblem, 1, 0, 12)}
+                disabled={isSubmittingSolve}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: "0.2rem",
+                  padding: "0.85rem 1rem",
+                  borderRadius: "var(--radius-sm)",
+                  background: "rgba(16, 185, 129, 0.1)",
+                  border: "1px solid rgba(16, 185, 129, 0.3)",
+                  color: "#f9fafb",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: "0.92rem", color: "#34d399", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                  <Zap size={15} />
+                  <span>Autonomous Solve (1 Attempt, 0 Hints)</span>
+                </div>
+                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                  Unassisted first-attempt pass. Strengthens verified capability score without false-progress flags.
+                </div>
+              </button>
+
+              <button
+                onClick={() => handleExecuteSolve(solvingProblem, 4, 3, 25)}
+                disabled={isSubmittingSolve}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: "0.2rem",
+                  padding: "0.85rem 1rem",
+                  borderRadius: "var(--radius-sm)",
+                  background: "rgba(245, 158, 11, 0.1)",
+                  border: "1px solid rgba(245, 158, 11, 0.3)",
+                  color: "#f9fafb",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: "0.92rem", color: "#fbbf24", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                  <AlertTriangle size={15} />
+                  <span>Assisted / Hint-Heavy Solve (4 Attempts, 3 Hints)</span>
+                </div>
+                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                  Multiple attempts and heavy hint reliance. Triggers FPDE heuristic detection for demonstration.
+                </div>
+              </button>
+            </div>
+
+            {/* Custom parameters option */}
+            <div
+              style={{
+                background: "var(--bg-secondary)",
+                borderRadius: "var(--radius-sm)",
+                padding: "1rem",
+                marginBottom: "1.5rem",
+              }}
+            >
+              <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.75rem" }}>
+                Or customize specific telemetry parameters:
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block" }}>Submissions</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={customAttempts}
+                    onChange={(e) => setCustomAttempts(parseInt(e.target.value) || 1)}
+                    style={{ width: "100%", padding: "0.4rem 0.6rem", fontSize: "0.85rem", marginTop: "0.2rem" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block" }}>Hints Used</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={10}
+                    value={customHints}
+                    onChange={(e) => setCustomHints(parseInt(e.target.value) || 0)}
+                    style={{ width: "100%", padding: "0.4rem 0.6rem", fontSize: "0.85rem", marginTop: "0.2rem" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block" }}>Duration (mins)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={customDuration}
+                    onChange={(e) => setCustomDuration(parseInt(e.target.value) || 15)}
+                    style={{ width: "100%", padding: "0.4rem 0.6rem", fontSize: "0.85rem", marginTop: "0.2rem" }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
+              <button
+                onClick={() => setSolvingProblem(null)}
+                className="btn-secondary"
+                disabled={isSubmittingSolve}
+                style={{ fontSize: "0.85rem" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleExecuteSolve(solvingProblem, customAttempts, customHints, customDuration)}
+                className="btn-primary"
+                disabled={isSubmittingSolve}
+                style={{ fontSize: "0.85rem" }}
+              >
+                {isSubmittingSolve ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <span>Submit Custom Telemetry</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Interactive Mastery Flow Modal */}
       {isMasteryModalOpen && nextAction?.target_topic && (

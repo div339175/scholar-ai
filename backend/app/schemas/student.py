@@ -12,6 +12,7 @@ class StudentBase(BaseModel):
 
 class StudentCreate(StudentBase):
     id: Optional[str] = None
+    baseline_level: Optional[str] = "Intermediate"
 
 class StudentResponse(StudentBase):
     id: str

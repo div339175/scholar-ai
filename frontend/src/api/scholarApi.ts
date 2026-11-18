@@ -181,5 +181,74 @@ export const scholarApi = {
       node_type: string;
     }>>(res);
   },
+
+  async createStudent(payload: {
+    name: string;
+    career_goal: string;
+    weekly_hours?: number;
+    baseline_level?: string;
+    id?: string;
+  }): Promise<StudentProfile> {
+    const res = await fetch(`${BASE_URL}/students`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<StudentProfile>(res);
+  },
+
+  async completeRoadmapNode(studentId: string, nodeId: string): Promise<any[]> {
+    const res = await fetch(
+      `${BASE_URL}/students/${encodeURIComponent(studentId)}/roadmap/${encodeURIComponent(nodeId)}/complete`,
+      { method: "POST" }
+    );
+    return handleResponse<any[]>(res);
+  },
+
+  async getProblems(topic?: string): Promise<Array<{ id: string; title: string; topic: string; difficulty: string }>> {
+    const url = topic
+      ? `${BASE_URL}/problems?topic=${encodeURIComponent(topic)}`
+      : `${BASE_URL}/problems`;
+    const res = await fetch(url);
+    return handleResponse<Array<{ id: string; title: string; topic: string; difficulty: string }>>(res);
+  },
+
+  async recordTelemetry(
+    studentId: string,
+    payload: {
+      problem_id: string;
+      topic: string;
+      difficulty: string;
+      submission_count: number;
+      successful: boolean;
+      first_attempt_pass: boolean;
+      hints_requested: number;
+      active_coding_duration_seconds: number;
+    }
+  ): Promise<any> {
+    const res = await fetch(
+      `${BASE_URL}/students/${encodeURIComponent(studentId)}/telemetry`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    return handleResponse<any>(res);
+  },
+
+  async getTelemetryMetrics(studentId: string): Promise<{
+    total_events: number;
+    first_attempt_pass_rate: number;
+    hint_dependency_rate: number;
+    average_duration_seconds: number;
+    multi_attempt_count: number;
+    topic_breakdown: Record<string, any>;
+  } | null> {
+    const res = await fetch(
+      `${BASE_URL}/students/${encodeURIComponent(studentId)}/telemetry/metrics`
+    );
+    return handleResponse<any>(res);
+  },
 };
 

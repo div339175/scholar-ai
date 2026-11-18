@@ -6,6 +6,7 @@ import { StudentDashboardView } from "./components/StudentDashboardView";
 import { ScholarPage } from "./pages/ScholarPage";
 import { StudentSelector } from "./components/StudentSelector";
 import { BrainCircuit } from "lucide-react";
+import { StudentProfile } from "./types/scholar";
 
 type AppView = "landing" | "onboarding" | "dashboard" | "classic_evaluator";
 
@@ -27,7 +28,14 @@ export const App: React.FC = () => {
     return params.get("mode") === "demo" || params.get("demo") === "true";
   });
 
-  const [selectedStudentId, setSelectedStudentId] = useState<string>("student_alex");
+  const [selectedStudentId, setSelectedStudentId] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paramId = params.get("student_id");
+    if (paramId) return paramId;
+    const stored = localStorage.getItem("stepcode_active_student_id");
+    if (stored) return stored;
+    return "student_alex";
+  });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [onboardingData, setOnboardingData] = useState<OnboardingData | null>(null);
 
@@ -45,7 +53,8 @@ export const App: React.FC = () => {
   }, []);
 
   const handleGetStarted = () => {
-    setIsAuthModalOpen(true);
+    // Direct onboarding without fake login barriers
+    setCurrentView("onboarding");
   };
 
   const handleExploreDemo = () => {
@@ -55,16 +64,25 @@ export const App: React.FC = () => {
   };
 
   const handleLogin = () => {
-    setIsAuthModalOpen(true);
+    const stored = localStorage.getItem("stepcode_active_student_id");
+    if (stored) {
+      setSelectedStudentId(stored);
+      setIsDemoMode(false);
+      setCurrentView("dashboard");
+    } else {
+      setCurrentView("onboarding");
+    }
   };
 
   const handleAuthSuccess = (_email: string) => {
     setIsAuthModalOpen(false);
-    // Proceed to student onboarding if not yet onboarded
-    if (!onboardingData) {
-      setCurrentView("onboarding");
-    } else {
+    const stored = localStorage.getItem("stepcode_active_student_id");
+    if (stored) {
+      setSelectedStudentId(stored);
+      setIsDemoMode(false);
       setCurrentView("dashboard");
+    } else {
+      setCurrentView("onboarding");
     }
   };
 
@@ -75,8 +93,11 @@ export const App: React.FC = () => {
     setCurrentView("dashboard");
   };
 
-  const handleOnboardingComplete = (data: OnboardingData) => {
+  const handleOnboardingComplete = (createdStudent: StudentProfile, data: OnboardingData) => {
     setOnboardingData(data);
+    setSelectedStudentId(createdStudent.id);
+    setIsDemoMode(false);
+    localStorage.setItem("stepcode_active_student_id", createdStudent.id);
     setCurrentView("dashboard");
   };
 

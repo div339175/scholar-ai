@@ -22,6 +22,14 @@ class TelemetryService:
             timestamp=data.timestamp or datetime.now(timezone.utc),
         )
         db.add(telemetry)
+
+        # Update student activity streak if successful
+        if data.successful:
+            from app.models.student import Student
+            student = db.query(Student).filter(Student.id == student_id).first()
+            if student and student.current_streak == 0:
+                student.current_streak = 1
+
         db.commit()
         db.refresh(telemetry)
         return telemetry

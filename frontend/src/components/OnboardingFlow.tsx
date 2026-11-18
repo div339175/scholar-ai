@@ -1,22 +1,28 @@
 import React, { useState } from "react";
-import { Compass, CheckCircle2, ArrowRight, ArrowLeft, Target, Clock, Zap, BookOpen } from "lucide-react";
+import { Compass, CheckCircle2, ArrowRight, ArrowLeft, Target, Clock, Zap, User, AlertCircle, Loader2 } from "lucide-react";
+import { scholarApi, ApiError } from "../api/scholarApi";
+import { StudentProfile } from "../types/scholar";
 
 export interface OnboardingData {
+  name: string;
   goal: string;
   experienceLevel: string;
   weeklyHours: string;
 }
 
 interface Props {
-  onComplete: (data: OnboardingData) => void;
+  onComplete: (student: StudentProfile, data: OnboardingData) => void;
   onCancel: () => void;
 }
 
 export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
   const [step, setStep] = useState<number>(1);
+  const [name, setName] = useState<string>("");
   const [goal, setGoal] = useState<string>("Full-Stack Developer");
   const [experienceLevel, setExperienceLevel] = useState<string>("Intermediate");
   const [weeklyHours, setWeeklyHours] = useState<string>("10 hours/week");
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const goals = [
     { id: "Full-Stack Developer", label: "Full-Stack Developer", desc: "Build modern web services, frontend dashboards, and robust APIs." },
@@ -33,18 +39,56 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
   ];
 
   const commitmentLevels = [
-    { id: "5 hours/week", label: "5 hours / week", desc: "Light, steady learning pace alongside coursework or job." },
-    { id: "10 hours/week", label: "10 hours / week", desc: "Recommended pace: 1–2 hours daily for continuous momentum." },
-    { id: "15 hours/week", label: "15 hours / week", desc: "Accelerated track for upcoming placement season deadlines." },
-    { id: "20+ hours/week", label: "20+ hours / week", desc: "Intensive immersive preparation and rapid roadmap completion." },
+    { id: "5 hours/week", label: "5 hours / week", hours: 5.0, desc: "Light, steady learning pace alongside coursework or job." },
+    { id: "10 hours/week", label: "10 hours / week", hours: 10.0, desc: "Recommended pace: 1–2 hours daily for continuous momentum." },
+    { id: "15 hours/week", label: "15 hours / week", hours: 15.0, desc: "Accelerated track for upcoming placement season deadlines." },
+    { id: "20+ hours/week", label: "20+ hours / week", hours: 20.0, desc: "Intensive immersive preparation and rapid roadmap completion." },
   ];
 
-  const handleFinish = () => {
-    onComplete({
-      goal,
-      experienceLevel,
-      weeklyHours,
-    });
+  const handleFinish = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setErrorMessage("Please enter your name to personalize your student profile.");
+      setStep(1);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    const numericHours = parseFloat(weeklyHours) || 10.0;
+
+    try {
+      const createdStudent = await scholarApi.createStudent({
+        name: trimmedName,
+        career_goal: goal,
+        weekly_hours: numericHours,
+        baseline_level: experienceLevel,
+      });
+
+      onComplete(createdStudent, {
+        name: trimmedName,
+        goal,
+        experienceLevel,
+        weeklyHours,
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        setErrorMessage(err.message);
+      } else {
+        setErrorMessage("Failed to create student in database. Please check backend connection.");
+      }
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStepNext = () => {
+    if (step === 1 && !name.trim()) {
+      setErrorMessage("Please enter your name to proceed.");
+      return;
+    }
+    setErrorMessage(null);
+    setStep(step + 1);
   };
 
   return (
@@ -71,7 +115,7 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
         }}
       >
         {/* Progress indicators */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "2rem" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <Compass size={20} color="#818cf8" />
             <span style={{ fontSize: "0.85rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "#818cf8" }}>
@@ -99,12 +143,77 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
           ))}
         </div>
 
-        {/* Step 1: Goal */}
+        {/* Error notification if any */}
+        {errorMessage && (
+          <div
+            style={{
+              padding: "0.75rem 1rem",
+              background: "rgba(239, 68, 68, 0.15)",
+              border: "1px solid rgba(239, 68, 68, 0.3)",
+              borderRadius: "var(--radius-sm)",
+              color: "#fca5a5",
+              fontSize: "0.88rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              marginBottom: "1.5rem",
+            }}
+          >
+            <AlertCircle size={16} />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* Step 1: Student Name */}
         {step === 1 && (
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
+              <User size={20} color="#818cf8" />
+              <h2 style={{ fontSize: "1.4rem", fontWeight: 700 }}>What is your name?</h2>
+            </div>
+            <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", marginBottom: "1.5rem" }}>
+              Scholar AI will create a distinct, persistent profile in the SQLite database with your own personalized roadmap.
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              <label style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 600 }}>
+                Full Name
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (errorMessage) setErrorMessage(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && name.trim()) {
+                    handleStepNext();
+                  }
+                }}
+                placeholder="e.g., Divakar Maurya"
+                autoFocus
+                style={{
+                  width: "100%",
+                  padding: "0.85rem 1rem",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--border-subtle)",
+                  color: "#f9fafb",
+                  fontSize: "1rem",
+                  outline: "none",
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Goal */}
+        {step === 2 && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
               <Target size={20} color="#818cf8" />
-              <h2 style={{ fontSize: "1.4rem", fontWeight: 700 }}>What is your primary goal?</h2>
+              <h2 style={{ fontSize: "1.4rem", fontWeight: 700 }}>What is your primary career goal?</h2>
             </div>
             <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", marginBottom: "1.5rem" }}>
               Scholar AI will calibrate roadmap milestones and competence thresholds to match your trajectory.
@@ -142,8 +251,8 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
           </div>
         )}
 
-        {/* Step 2: Experience */}
-        {step === 2 && (
+        {/* Step 3: Experience */}
+        {step === 3 && (
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
               <Zap size={20} color="#818cf8" />
@@ -180,24 +289,24 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
           </div>
         )}
 
-        {/* Step 3: Commitment */}
-        {step === 3 && (
+        {/* Step 4: Commitment & Launch Summary */}
+        {step === 4 && (
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
               <Clock size={20} color="#818cf8" />
-              <h2 style={{ fontSize: "1.4rem", fontWeight: 700 }}>How much time can you commit weekly?</h2>
+              <h2 style={{ fontSize: "1.4rem", fontWeight: 700 }}>Weekly commitment & verification</h2>
             </div>
-            <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", marginBottom: "1.5rem" }}>
-              Scholar AI uses your commitment to balance practice sprint lengths and prevent burnout.
+            <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", marginBottom: "1.25rem" }}>
+              Scholar AI balances your weekly practice pace and monitors true conceptual retention.
             </p>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", marginBottom: "1.25rem" }}>
               {commitmentLevels.map((c) => (
                 <div
                   key={c.id}
                   onClick={() => setWeeklyHours(c.id)}
                   style={{
-                    padding: "1rem",
+                    padding: "0.8rem 1rem",
                     borderRadius: "var(--radius-sm)",
                     border: `1px solid ${weeklyHours === c.id ? "#6366f1" : "var(--border-subtle)"}`,
                     background: weeklyHours === c.id ? "rgba(99, 102, 241, 0.12)" : "var(--bg-secondary)",
@@ -208,57 +317,38 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>{c.label}</div>
-                    <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.2rem" }}>{c.desc}</div>
+                    <div style={{ fontWeight: 600, fontSize: "0.92rem" }}>{c.label}</div>
+                    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "0.15rem" }}>{c.desc}</div>
                   </div>
                   {weeklyHours === c.id && <CheckCircle2 size={18} color="#818cf8" />}
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Step 4: Baseline Assessment Explanation */}
-        {step === 4 && (
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
-              <BookOpen size={20} color="#818cf8" />
-              <h2 style={{ fontSize: "1.4rem", fontWeight: 700 }}>Let's establish your starting point</h2>
-            </div>
-            <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", marginBottom: "1.25rem" }}>
-              Scholar AI continuously verifies your learning from actual problem submissions rather than activity volume alone.
-            </p>
 
             <div
               style={{
                 background: "rgba(11, 15, 25, 0.7)",
                 borderRadius: "var(--radius-sm)",
                 border: "1px solid var(--border-subtle)",
-                padding: "1.25rem",
+                padding: "1rem",
                 display: "flex",
                 flexDirection: "column",
-                gap: "0.85rem",
-                fontSize: "0.85rem",
+                gap: "0.6rem",
+                fontSize: "0.82rem",
                 color: "var(--text-secondary)",
-                lineHeight: 1.5,
+                lineHeight: 1.45,
               }}
             >
-              <div style={{ display: "flex", gap: "0.6rem" }}>
-                <CheckCircle2 size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: "0.15rem" }} />
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <CheckCircle2 size={15} color="#818cf8" style={{ flexShrink: 0, marginTop: "0.15rem" }} />
                 <span>
-                  <strong>Evidence-Driven Personalization:</strong> Your initial roadmap will feature foundational modules (Arrays, Sliding Window) to evaluate your independent solve patterns.
+                  <strong>Database-Backed Student:</strong> Creating a persistent record for <strong>{name || "Student"}</strong> in SQLite with clean 0% initial roadmap progress.
                 </span>
               </div>
-              <div style={{ display: "flex", gap: "0.6rem" }}>
-                <CheckCircle2 size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: "0.15rem" }} />
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <CheckCircle2 size={15} color="#818cf8" style={{ flexShrink: 0, marginTop: "0.15rem" }} />
                 <span>
-                  <strong>Active Competence Mentoring:</strong> If you use hints frequently or struggle with retries, Scholar AI will pause advancement and guide you through focused micro-sprints.
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: "0.6rem" }}>
-                <CheckCircle2 size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: "0.15rem" }} />
-                <span>
-                  <strong>Prototype Demonstration Notice:</strong> Onboarding preferences are stored locally in your browser session for this prototype.
+                  <strong>Zero Benchmark Contamination:</strong> Demo profiles (Alex, Priya, Marcus) remain strictly isolated in Evaluator Demo Mode.
                 </span>
               </div>
             </div>
@@ -269,8 +359,12 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "2rem" }}>
           {step > 1 ? (
             <button
-              onClick={() => setStep(step - 1)}
+              onClick={() => {
+                setErrorMessage(null);
+                setStep(step - 1);
+              }}
               className="btn-secondary"
+              disabled={isSubmitting}
               style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontSize: "0.88rem" }}
             >
               <ArrowLeft size={16} />
@@ -280,6 +374,7 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
             <button
               onClick={onCancel}
               className="btn-secondary"
+              disabled={isSubmitting}
               style={{ fontSize: "0.88rem" }}
             >
               Cancel
@@ -288,7 +383,7 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
 
           {step < 4 ? (
             <button
-              onClick={() => setStep(step + 1)}
+              onClick={handleStepNext}
               className="btn-primary"
               style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontSize: "0.88rem", padding: "0.65rem 1.25rem" }}
             >
@@ -299,10 +394,20 @@ export const OnboardingFlow: React.FC<Props> = ({ onComplete, onCancel }) => {
             <button
               onClick={handleFinish}
               className="btn-primary"
+              disabled={isSubmitting}
               style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontSize: "0.88rem", padding: "0.65rem 1.25rem" }}
             >
-              <span>Launch My Student Dashboard</span>
-              <ArrowRight size={16} />
+              {isSubmitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>Registering in SQLite...</span>
+                </>
+              ) : (
+                <>
+                  <span>Create Account & Launch Dashboard</span>
+                  <ArrowRight size={16} />
+                </>
+              )}
             </button>
           )}
         </div>
