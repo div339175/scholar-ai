@@ -156,7 +156,7 @@ class RoadmapAdaptationService:
         # -------------------------------------------------------------------
         if (
             intervention.intervention_required and
-            intervention.roadmap_action == "PAUSE_ADVANCEMENT" and
+            intervention.roadmap_action in ("PAUSE_ADVANCEMENT", "INSERT_REMEDIATION") and
             intervention.mastery_check_required
         ):
             target_topic = active_target_topic or "Algorithmic Foundations"
@@ -296,5 +296,9 @@ class RoadmapAdaptationService:
                             node.status = NodeStatus.IN_PROGRESS.value
                             unlocked_one = True
                 db.commit()
+
+            elif decision.action == RoadmapAdaptationAction.CONTINUE_NORMAL.value:
+                # Normal progression: ensure uncompleted normal nodes sequential unlocking is preserved
+                pass
         except Exception:
             db.rollback()

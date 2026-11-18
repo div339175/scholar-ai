@@ -38,6 +38,8 @@ import {
   Clock,
   Lightbulb,
   Save,
+  ShieldAlert,
+  Activity,
 } from "lucide-react";
 
 interface Props {
@@ -91,6 +93,7 @@ export const StudentDashboardView: React.FC<Props> = ({
     difficulty: string;
     description?: string;
     solved?: boolean;
+    is_solved?: boolean;
     attempts?: number;
   }>>([]);
 
@@ -132,6 +135,8 @@ export const StudentDashboardView: React.FC<Props> = ({
     prerequisite_completed: boolean;
     mastery_status: string;
     can_complete: boolean;
+    effective_state?: string;
+    state_reason?: string;
   } | null>(null);
   const [isLoadingNodeDetails, setIsLoadingNodeDetails] = useState<boolean>(false);
   const [completionFeedback, setCompletionFeedback] = useState<{
@@ -295,16 +300,8 @@ export const StudentDashboardView: React.FC<Props> = ({
   };
 
   const handleCompleteNode = async (nodeId: string) => {
-    setIsCompletingNodeId(nodeId);
-    try {
-      const updatedNodes = await scholarApi.completeRoadmapNode(studentId, nodeId);
-      setRoadmapNodes(updatedNodes || []);
-      await loadData();
-    } catch (err) {
-      console.error("Failed to complete roadmap node:", err);
-    } finally {
-      setIsCompletingNodeId(null);
-    }
+    // Evidence-enforced completion: always routes through verification
+    await handleVerifyComplete(nodeId);
   };
 
   const handleStartNode = async (nodeId: string) => {
@@ -1092,11 +1089,57 @@ export const StudentDashboardView: React.FC<Props> = ({
             <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
               {roadmapNodes.map((node) => {
                 const isCompleted = node.status === "COMPLETED";
-                const isInProgress = node.status === "IN_PROGRESS";
+                const isLocked = node.is_locked;
                 const isPendingUnlocked = node.status === "PENDING" && !node.is_locked;
-                const isFocus = node.topic === nextAction?.target_topic;
-                const isCompletingThis = isCompletingNodeId === node.id;
+                const isInProgress = node.status === "IN_PROGRESS" && !node.is_locked;
                 const isStartingThis = isStartingNodeId === node.id;
+                const isCompletingThis = isCompletingNodeId === node.id;
+
+                // Check Scholar AI intervention & roadmap state for this topic
+                const isTopicPaused = Boolean(
+                  isInProgress &&
+                  (state?.roadmap?.action === "PAUSE_ADVANCEMENT" || state?.intervention?.roadmap_action === "PAUSE_ADVANCEMENT" || nextAction?.action === "COMPLETE_MASTERY_CHECK") &&
+                  (state?.roadmap?.topic === node.topic || !state?.roadmap?.topic || nextAction?.target_topic === node.topic)
+                );
+                const isTopicRemediation = Boolean(
+                  node.node_type === "REMEDIATION" ||
+                  (isInProgress && state?.roadmap?.action === "REMEDIATE_TOPIC" &&
+                    (state?.roadmap?.topic === node.topic || !state?.roadmap?.topic || nextAction?.target_topic === node.topic))
+                );
+
+                // Telemetry evidence
+                const solvedCount = Math.max(
+                  telemetryMetrics?.topic_breakdown?.[node.topic]?.total || 0,
+                  problems.filter((p) => p.topic === node.topic && (p.solved || p.is_solved)).length
+                );
+                const requiredEvidence = node.topic.includes("Sliding Window") ? 3 : 2;
+                const hasSufficientEvidence = solvedCount >= requiredEvidence;
+
+                let effectiveState: "COMPLETED" | "LOCKED" | "AVAILABLE" | "MASTERY_CHECK_REQUIRED" | "REMEDIATION" | "NEEDS_EVIDENCE" | "IN_PROGRESS" = "LOCKED";
+                let stateSubtitle = "";
+
+                if (isCompleted) {
+                  effectiveState = "COMPLETED";
+                  stateSubtitle = "Module completed based on verified learning evidence.";
+                } else if (isTopicPaused) {
+                  effectiveState = "MASTERY_CHECK_REQUIRED";
+                  stateSubtitle = "Scholar AI detected false progress • Mastery check required.";
+                } else if (isTopicRemediation) {
+                  effectiveState = "REMEDIATION";
+                  stateSubtitle = "Recent evidence indicates this topic needs conceptual reinforcement.";
+                } else if (isLocked) {
+                  effectiveState = "LOCKED";
+                  stateSubtitle = `Requires #${node.sequence - 1}`;
+                } else if (isPendingUnlocked) {
+                  effectiveState = "AVAILABLE";
+                  stateSubtitle = "Prerequisites satisfied • Ready to begin module.";
+                } else if (!hasSufficientEvidence) {
+                  effectiveState = "NEEDS_EVIDENCE";
+                  stateSubtitle = `Evidence: ${solvedCount}/${requiredEvidence} solved • More practice evidence needed.`;
+                } else {
+                  effectiveState = "IN_PROGRESS";
+                  stateSubtitle = `Evidence satisfied (${solvedCount}/${requiredEvidence} solved) • Ready for Scholar AI verification.`;
+                }
 
                 return (
                   <div
@@ -1110,7 +1153,21 @@ export const StudentDashboardView: React.FC<Props> = ({
                       padding: "1rem 1.25rem",
                       cursor: "pointer",
                       transition: "transform 0.15s ease, border-color 0.15s ease",
-                      borderLeft: `4px solid ${isCompleted ? "#34d399" : isInProgress ? "#6366f1" : isFocus ? "#fbbf24" : "var(--border-subtle)"}`,
+                      borderLeft: `4px solid ${
+                        effectiveState === "COMPLETED"
+                          ? "#34d399"
+                          : effectiveState === "MASTERY_CHECK_REQUIRED"
+                          ? "#f59e0b"
+                          : effectiveState === "REMEDIATION"
+                          ? "#ef4444"
+                          : effectiveState === "NEEDS_EVIDENCE"
+                          ? "#fbbf24"
+                          : effectiveState === "IN_PROGRESS"
+                          ? "#10b981"
+                          : effectiveState === "AVAILABLE"
+                          ? "#6366f1"
+                          : "var(--border-subtle)"
+                      }`,
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
@@ -1127,12 +1184,128 @@ export const StudentDashboardView: React.FC<Props> = ({
                         <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "0.15rem" }}>
                           Topic: <strong>{node.topic}</strong> • Est: {node.estimated_minutes} mins
                         </div>
+                        <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "0.2rem" }}>
+                          {stateSubtitle}
+                        </div>
                       </div>
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
-                      {/* Actions for IN_PROGRESS node */}
-                      {isInProgress && (
+                      {/* COMPLETED */}
+                      {effectiveState === "COMPLETED" && (
+                        <>
+                          <button
+                            onClick={() => {
+                              handleExplainTopic(node.topic);
+                              setActiveTab("scholar");
+                            }}
+                            className="btn-secondary"
+                            style={{ fontSize: "0.75rem", padding: "0.35rem 0.6rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                          >
+                            <BrainCircuit size={12} color="#818cf8" />
+                            <span>Review Invariants</span>
+                          </button>
+                          <span className="badge badge-success" style={{ fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                            <CheckCircle2 size={12} />
+                            <span>Completed</span>
+                          </span>
+                        </>
+                      )}
+
+                      {/* LOCKED */}
+                      {effectiveState === "LOCKED" && (
+                        <>
+                          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "0.25rem", marginRight: "0.25rem" }}>
+                            <Lock size={12} />
+                            <span>Requires #{node.sequence - 1}</span>
+                          </span>
+                          <span className="badge badge-neutral" style={{ fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                            <Lock size={12} />
+                            <span>Locked</span>
+                          </span>
+                        </>
+                      )}
+
+                      {/* AVAILABLE / NOT STARTED */}
+                      {effectiveState === "AVAILABLE" && (
+                        <>
+                          <button
+                            onClick={() => handleStartNode(node.id)}
+                            disabled={isStartingThis}
+                            className="btn-secondary"
+                            style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                          >
+                            {isStartingThis ? (
+                              <>
+                                <Loader2 size={13} className="animate-spin" />
+                                <span>Starting...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Play size={13} />
+                                <span>Start Module</span>
+                              </>
+                            )}
+                          </button>
+                          <span className="badge badge-info" style={{ fontSize: "0.75rem" }}>Available</span>
+                        </>
+                      )}
+
+                      {/* MASTERY_CHECK_REQUIRED */}
+                      {effectiveState === "MASTERY_CHECK_REQUIRED" && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setSelectedTopicFilter(node.topic);
+                              setIsMasteryModalOpen(true);
+                            }}
+                            className="btn-primary"
+                            style={{ fontSize: "0.75rem", padding: "0.35rem 0.75rem", background: "#f59e0b", borderColor: "#d97706", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                          >
+                            <ShieldAlert size={13} />
+                            <span>Verify Mastery</span>
+                          </button>
+                          <span className="badge badge-warning" style={{ fontSize: "0.75rem", background: "rgba(245, 158, 11, 0.15)", color: "#fbbf24", borderColor: "rgba(245, 158, 11, 0.3)", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                            <ShieldAlert size={12} />
+                            <span>Mastery Required</span>
+                          </span>
+                        </>
+                      )}
+
+                      {/* REMEDIATION */}
+                      {effectiveState === "REMEDIATION" && (
+                        <>
+                          <button
+                            onClick={() => {
+                              handleExplainTopic(node.topic);
+                              setActiveTab("scholar");
+                            }}
+                            className="btn-secondary"
+                            style={{ fontSize: "0.75rem", padding: "0.35rem 0.6rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                          >
+                            <BrainCircuit size={12} color="#818cf8" />
+                            <span>Review Invariants</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedTopicFilter(node.topic);
+                              setActiveTab("practice");
+                            }}
+                            className="btn-secondary"
+                            style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                          >
+                            <Code2 size={13} />
+                            <span>Practice Problems</span>
+                          </button>
+                          <span className="badge badge-danger" style={{ fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                            <AlertTriangle size={12} />
+                            <span>Remediation</span>
+                          </span>
+                        </>
+                      )}
+
+                      {/* NEEDS_EVIDENCE */}
+                      {effectiveState === "NEEDS_EVIDENCE" && (
                         <>
                           <button
                             onClick={() => {
@@ -1145,79 +1318,40 @@ export const StudentDashboardView: React.FC<Props> = ({
                             <Code2 size={13} />
                             <span>Practice Problems</span>
                           </button>
+                          <span className="badge badge-warning" style={{ fontSize: "0.75rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                            <Activity size={12} />
+                            <span>Needs Evidence ({solvedCount}/{requiredEvidence})</span>
+                          </span>
+                        </>
+                      )}
 
+                      {/* IN_PROGRESS (evidence satisfied) */}
+                      {effectiveState === "IN_PROGRESS" && (
+                        <>
                           <button
-                            onClick={() => handleCompleteNode(node.id)}
+                            onClick={() => handleVerifyComplete(node.id)}
                             disabled={isCompletingThis}
                             className="btn-primary"
-                            style={{ fontSize: "0.75rem", padding: "0.35rem 0.75rem" }}
+                            style={{ fontSize: "0.75rem", padding: "0.35rem 0.75rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
                           >
                             {isCompletingThis ? (
                               <>
                                 <Loader2 size={13} className="animate-spin" />
-                                <span>Saving...</span>
+                                <span>Verifying...</span>
                               </>
                             ) : (
                               <>
                                 <Check size={13} />
-                                <span>Complete Module</span>
+                                <span>Verify Evidence</span>
                               </>
                             )}
                           </button>
+                          <span className="badge badge-info" style={{ fontSize: "0.75rem", background: "rgba(16, 185, 129, 0.15)", color: "#34d399", borderColor: "rgba(16, 185, 129, 0.3)", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                            <Check size={12} />
+                            <span>Evidence Ready</span>
+                          </span>
                         </>
                       )}
-
-                      {/* Actions for PENDING unlocked node */}
-                      {isPendingUnlocked && (
-                        <button
-                          onClick={() => handleStartNode(node.id)}
-                          disabled={isStartingThis}
-                          className="btn-secondary"
-                          style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
-                        >
-                          {isStartingThis ? (
-                            <>
-                              <Loader2 size={13} className="animate-spin" />
-                              <span>Starting...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Play size={13} />
-                              <span>Start Module</span>
-                            </>
-                          )}
-                        </button>
-                      )}
-
-                      {/* Actions for COMPLETED node */}
-                      {isCompleted && (
-                        <button
-                          onClick={() => {
-                            handleExplainTopic(node.topic);
-                            setActiveTab("scholar");
-                          }}
-                          className="btn-secondary"
-                          style={{ fontSize: "0.75rem", padding: "0.35rem 0.6rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
-                        >
-                          <BrainCircuit size={12} color="#818cf8" />
-                          <span>Review Invariants</span>
-                        </button>
-                      )}
-
-                      {/* Locked status subtitle */}
-                      {node.is_locked && (
-                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "0.25rem", marginRight: "0.25rem" }}>
-                          <Lock size={12} />
-                          <span>Requires #{node.sequence - 1}</span>
-                        </span>
-                      )}
-
-                      <span
-                        className={`badge ${isCompleted ? "badge-success" : isInProgress ? "badge-info" : isFocus ? "badge-warning" : "badge-neutral"}`}
-                        style={{ fontSize: "0.75rem" }}
-                      >
-                        {isCompleted ? "Completed" : isInProgress ? "In Progress" : isFocus ? "Verification Needed" : "Locked"}
-                      </span>
                     </div>
                   </div>
                 );
@@ -2520,6 +2654,45 @@ export const StudentDashboardView: React.FC<Props> = ({
               </div>
             </div>
 
+            {/* Effective State Callout */}
+            {selectedNodeDetails.effective_state && (
+              <div
+                style={{
+                  padding: "0.75rem 1rem",
+                  borderRadius: "var(--radius-sm)",
+                  background:
+                    selectedNodeDetails.effective_state === "COMPLETED"
+                      ? "rgba(16, 185, 129, 0.1)"
+                      : selectedNodeDetails.effective_state === "MASTERY_CHECK_REQUIRED"
+                      ? "rgba(245, 158, 11, 0.1)"
+                      : selectedNodeDetails.effective_state === "REMEDIATION"
+                      ? "rgba(239, 68, 68, 0.1)"
+                      : "var(--bg-secondary)",
+                  border: `1px solid ${
+                    selectedNodeDetails.effective_state === "COMPLETED"
+                      ? "rgba(16, 185, 129, 0.25)"
+                      : selectedNodeDetails.effective_state === "MASTERY_CHECK_REQUIRED"
+                      ? "rgba(245, 158, 11, 0.25)"
+                      : selectedNodeDetails.effective_state === "REMEDIATION"
+                      ? "rgba(239, 68, 68, 0.25)"
+                      : "var(--border-subtle)"
+                  }`,
+                  marginBottom: "1.25rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  fontSize: "0.82rem",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>
+                  Status: {selectedNodeDetails.effective_state.replace(/_/g, " ")}
+                </div>
+                <span>•</span>
+                <div>{selectedNodeDetails.state_reason}</div>
+              </div>
+            )}
+
             {/* Actions inside Module Modal */}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
               <button
@@ -2535,7 +2708,22 @@ export const StudentDashboardView: React.FC<Props> = ({
                 <span>Practice Topic Problems</span>
               </button>
 
-              {selectedNodeDetails.status === "IN_PROGRESS" && (
+              {selectedNodeDetails.effective_state === "MASTERY_CHECK_REQUIRED" && (
+                <button
+                  onClick={() => {
+                    setSelectedTopicFilter(selectedNodeDetails.topic);
+                    setSelectedNodeDetails(null);
+                    setIsMasteryModalOpen(true);
+                  }}
+                  className="btn-primary"
+                  style={{ fontSize: "0.85rem", background: "#f59e0b", borderColor: "#d97706" }}
+                >
+                  <ShieldAlert size={14} />
+                  <span>Start Mastery Check</span>
+                </button>
+              )}
+
+              {selectedNodeDetails.can_complete && (
                 <button
                   onClick={() => handleVerifyComplete(selectedNodeDetails.id)}
                   disabled={isCompletingNodeId === selectedNodeDetails.id}

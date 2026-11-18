@@ -119,9 +119,9 @@ def test_2_two_distinct_students_data_isolated(client, db_session):
         "active_coding_duration_seconds": 600,
     })
 
-    # Complete roadmap node 1 only for Student B
+    # Complete roadmap node 1 only for Student B with force=True fixture
     nodes_b = client.get(f"/api/students/{id_b}/roadmap").json()
-    client.post(f"/api/students/{id_b}/roadmap/{nodes_b[0]['id']}/complete")
+    client.post(f"/api/students/{id_b}/roadmap/{nodes_b[0]['id']}/complete?force=true")
 
     # Verify Student A has 1 telemetry event, Student B has 0
     metrics_a = client.get(f"/api/students/{id_a}/telemetry/metrics").json()
@@ -138,8 +138,9 @@ def test_2_two_distinct_students_data_isolated(client, db_session):
 
 def test_3_complete_roadmap_node_persists_and_updates_completion(client, db_session):
     """
-    Test 3: Complete a roadmap node.
-    Verify:
+    Test 3: Evidence-enforced roadmap completion:
+    - Verifies arbitrary completion without evidence fails with HTTP 400.
+    - Adding required practice evidence allows completion to succeed.
     - Node status updates to COMPLETED in database.
     - Next sequential node is unlocked (status=IN_PROGRESS).
     - Student roadmap_completion percentage updates to reflect progress.
@@ -154,7 +155,25 @@ def test_3_complete_roadmap_node_persists_and_updates_completion(client, db_sess
     assert node_2["status"] == "PENDING"
     assert node_2["is_locked"] is True
 
-    # Complete node 1
+    # 1. Arbitrary completion without practice evidence is rejected
+    unearned_resp = client.post(f"/api/students/{student_id}/roadmap/{node_1['id']}/complete")
+    assert unearned_resp.status_code == 400
+    assert "Cannot complete module without evidence" in unearned_resp.json()["detail"]
+
+    # 2. Log 2 independent problem solves
+    for pid in ["prob_arr_01", "prob_arr_02"]:
+        client.post(f"/api/students/{student_id}/telemetry", json={
+            "problem_id": pid,
+            "topic": "Arrays & Hashing",
+            "difficulty": "Easy",
+            "submission_count": 1,
+            "successful": True,
+            "first_attempt_pass": True,
+            "hints_requested": 0,
+            "active_coding_duration_seconds": 300,
+        })
+
+    # 3. Complete node 1 with verified evidence
     complete_resp = client.post(f"/api/students/{student_id}/roadmap/{node_1['id']}/complete")
     assert complete_resp.status_code == 200
     nodes_after = complete_resp.json()
@@ -427,16 +446,18 @@ def test_9_process_restart_and_persistence(client):
     resp = client.post("/api/students", json={"name": unique_name, "career_goal": "Cloud Architect"})
     student_id = resp.json()["id"]
 
-    # Log telemetry
-    client.post(f"/api/students/{student_id}/telemetry", json={
-        "topic": "Arrays & Hashing",
-        "difficulty": "Easy",
-        "submission_count": 1,
-        "successful": True,
-        "first_attempt_pass": True,
-        "hints_requested": 0,
-        "active_coding_duration_seconds": 650,
-    })
+    # Log 2 independent problem solves
+    for pid in ["prob_arr_01", "prob_arr_02"]:
+        client.post(f"/api/students/{student_id}/telemetry", json={
+            "problem_id": pid,
+            "topic": "Arrays & Hashing",
+            "difficulty": "Easy",
+            "submission_count": 1,
+            "successful": True,
+            "first_attempt_pass": True,
+            "hints_requested": 0,
+            "active_coding_duration_seconds": 325,
+        })
 
     # Complete node 1
     nodes = client.get(f"/api/students/{student_id}/roadmap").json()
@@ -455,7 +476,7 @@ def test_9_process_restart_and_persistence(client):
             .filter(CodingTelemetry.student_id == student_id)
             .all()
         )
-        assert len(reloaded_telemetry) == 1
+        assert len(reloaded_telemetry) == 2
 
         reloaded_nodes = (
             fresh_db.query(RoadmapNode)
@@ -554,3 +575,131 @@ def test_11_evidence_based_module_completion_verification(client):
     assert updated_nodes[0]["status"] == "COMPLETED"
     assert updated_nodes[1]["status"] == "IN_PROGRESS"
     assert updated_nodes[1]["is_locked"] is False
+
+
+def test_12_mastery_check_completion_unlocks_roadmap_and_remediation_blocks(client, db_session):
+    """
+    Test 12: Comprehensive Scholar AI Completion Loop:
+    - False progress detection triggers PAUSE_ADVANCEMENT on Sliding Window.
+    - Node effective_state reflects MASTERY_CHECK_REQUIRED.
+    - Direct completion is rejected with HTTP 400.
+    - Failed mastery check triggers REMEDIATION, blocks advancement.
+    - Successful mastery check triggers RESUME_ROADMAP, marks Sliding Window COMPLETED,
+      and unlocks the next sequential normal node (Recursion).
+    """
+    resp = client.post("/api/students", json={"name": "Grace Hopper", "career_goal": "Compilers"})
+    student_id = resp.json()["id"]
+
+    # 1. Complete module 1 and 2 so module 3 (Sliding Window) is IN_PROGRESS
+    for pid in ["prob_arr_01", "prob_arr_02"]:
+        client.post(f"/api/students/{student_id}/telemetry", json={
+            "problem_id": pid,
+            "topic": "Arrays & Hashing",
+            "difficulty": "Easy",
+            "submission_count": 1,
+            "successful": True,
+            "first_attempt_pass": True,
+            "hints_requested": 0,
+            "active_coding_duration_seconds": 300,
+        })
+    nodes_init = client.get(f"/api/students/{student_id}/roadmap").json()
+    client.post(f"/api/students/{student_id}/roadmap/{nodes_init[0]['id']}/complete", params={"force": True})
+    client.post(f"/api/students/{student_id}/roadmap/{nodes_init[1]['id']}/complete", params={"force": True})
+
+    # Set velocity decoupling to demonstrate false progress
+    student_record = db_session.query(Student).filter(Student.id == student_id).first()
+    student_record.roadmap_completion = 65.0
+    db_session.commit()
+
+    # 2. Simulate false progress on Sliding Window (7 hint-heavy, multi-attempt submissions)
+    for i in range(7):
+        client.post(f"/api/students/{student_id}/telemetry", json={
+            "problem_id": f"prob_sw_{i}",
+            "topic": "Sliding Window",
+            "difficulty": "Medium",
+            "submission_count": 5,
+            "successful": True,
+            "first_attempt_pass": False,
+            "hints_requested": 4,
+            "active_coding_duration_seconds": 5000,
+        })
+
+    # Verify Scholar AI adaptation pauses advancement
+    adaptation_resp = client.get(f"/api/students/{student_id}/roadmap/adaptation")
+    assert adaptation_resp.status_code == 200
+    assert adaptation_resp.json()["action"] == "PAUSE_ADVANCEMENT"
+
+    nodes = client.get(f"/api/students/{student_id}/roadmap").json()
+    sw_node = next(n for n in nodes if n["topic"] == "Sliding Window")
+    
+    # 3. Direct completion of paused module must fail with 400
+    blocked_resp = client.post(f"/api/students/{student_id}/roadmap/{sw_node['id']}/complete")
+    assert blocked_resp.status_code == 400
+    assert "Advancement is paused by Scholar AI" in blocked_resp.json()["detail"]
+
+    # 4. Check details returns MASTERY_CHECK_REQUIRED
+    details = client.get(f"/api/students/{student_id}/roadmap/{sw_node['id']}/details").json()
+    assert details["effective_state"] == "MASTERY_CHECK_REQUIRED"
+    assert details["can_complete"] is False
+
+    # 5. Submit failing mastery check (conceptual score 0)
+    q_resp = client.get(f"/api/students/{student_id}/mastery-assessment/Sliding Window")
+    question = q_resp.json()
+    client.post(f"/api/students/{student_id}/mastery-assessment/submit", json={
+        "topic": "Sliding Window",
+        "question_id": question["question_id"],
+        "answer": "Z",
+    })
+    fail_check_resp = client.post(f"/api/students/{student_id}/mastery-check", json={
+        "student_id": student_id,
+        "topic": "Sliding Window",
+        "problem_id": "prob_sw_01",
+        "solved": False,
+        "hints_used": 3,
+        "attempts": 4,
+    })
+    assert fail_check_resp.status_code == 200
+    assert fail_check_resp.json()["decision"] == "NOT_MASTERED"
+
+    # Verify adaptation is now REMEDIATE_TOPIC
+    rem_adaptation = client.get(f"/api/students/{student_id}/roadmap/adaptation").json()
+    assert rem_adaptation["action"] == "REMEDIATE_TOPIC"
+
+    # Details now reflects REMEDIATION
+    rem_details = client.get(f"/api/students/{student_id}/roadmap/{sw_node['id']}/details").json()
+    assert rem_details["effective_state"] == "REMEDIATION"
+
+    # 6. Submit passing verified mastery check (unassisted, 100% score)
+    client.post(f"/api/students/{student_id}/mastery-assessment/submit", json={
+        "topic": "Sliding Window",
+        "question_id": question["question_id"],
+        "answer": "B",
+    })
+    pass_mastery = client.post(f"/api/students/{student_id}/mastery-check", json={
+        "student_id": student_id,
+        "topic": "Sliding Window",
+        "problem_id": "prob_sw_01",
+        "solved": True,
+        "hints_used": 0,
+        "attempts": 1,
+        "conceptual_score": 100.0,
+    })
+    assert pass_mastery.json()["decision"] == "MASTERED"
+
+    # 7. Verify roadmap has unpaused: Sliding Window is unlocked and IN_PROGRESS
+    final_nodes = client.get(f"/api/students/{student_id}/roadmap").json()
+    final_sw = next(n for n in final_nodes if n["topic"] == "Sliding Window")
+    assert final_sw["status"] == "IN_PROGRESS"
+    assert final_sw["is_locked"] is False
+
+    # 8. Now verify-completion on Sliding Window succeeds based on verified evidence
+    verify_resp = client.post(f"/api/students/{student_id}/roadmap/{final_sw['id']}/verify-completion")
+    assert verify_resp.status_code == 200
+    assert verify_resp.json()["allowed"] is True
+    assert verify_resp.json()["status"] == "COMPLETED"
+
+    # 9. Next sequential module (Recursion) is now unlocked and IN_PROGRESS
+    updated_nodes = client.get(f"/api/students/{student_id}/roadmap").json()
+    rec_node = next(n for n in updated_nodes if n["topic"] == "Recursion")
+    assert rec_node["status"] == "IN_PROGRESS"
+    assert rec_node["is_locked"] is False

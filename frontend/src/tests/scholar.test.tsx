@@ -726,7 +726,20 @@ describe("Scholar AI Frontend Integration Tests", () => {
     vi.spyOn(scholarApi, "getProblems").mockResolvedValue([
       { id: "prob_arr_01", title: "Two Sum", topic: "Arrays & Hashing", difficulty: "Easy" },
     ]);
-    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue({
+      total_events: 2,
+      first_attempt_pass_rate: 1.0,
+      hint_dependency_rate: 0.0,
+      average_duration_seconds: 120,
+      multi_attempt_count: 0,
+      topic_breakdown: {
+        "Arrays & Hashing": {
+          total: 2,
+          avg_attempts: 1,
+          hint_rate: 0,
+        },
+      },
+    });
 
     const recordSpy = vi.spyOn(scholarApi, "recordTelemetry").mockResolvedValue({});
 
@@ -816,22 +829,43 @@ describe("Scholar AI Frontend Integration Tests", () => {
         node_type: "NORMAL",
       },
     ]);
-    vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
-    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
-
-    const completeSpy = vi.spyOn(scholarApi, "completeRoadmapNode").mockResolvedValue([
+    vi.spyOn(scholarApi, "getProblems").mockResolvedValue([
       {
-        id: "node_array_01",
-        student_id: "student_test_1",
-        title: "Foundations of Arrays & Hashing",
+        id: "prob_1",
+        title: "Two Sum",
         topic: "Arrays & Hashing",
-        status: "COMPLETED",
-        sequence: 1,
-        estimated_minutes: 120,
-        is_locked: false,
-        node_type: "NORMAL",
+        difficulty: "EASY",
+        solved: true,
+      },
+      {
+        id: "prob_2",
+        title: "Contains Duplicate",
+        topic: "Arrays & Hashing",
+        difficulty: "EASY",
+        solved: true,
       },
     ]);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue({
+      total_events: 2,
+      first_attempt_pass_rate: 1.0,
+      hint_dependency_rate: 0.0,
+      average_duration_seconds: 120,
+      multi_attempt_count: 0,
+      topic_breakdown: {
+        "Arrays & Hashing": {
+          total: 2,
+          avg_attempts: 1,
+          hint_rate: 0,
+        },
+      },
+    });
+
+    const verifySpy = vi.spyOn(scholarApi, "verifyRoadmapNodeCompletion").mockResolvedValue({
+      allowed: true,
+      status: "SUCCESS",
+      message: "Module completed successfully.",
+      action: "ADVANCE_ROADMAP",
+    });
 
     render(
       <StudentDashboardView
@@ -851,14 +885,18 @@ describe("Scholar AI Frontend Integration Tests", () => {
     const roadmapTabBtn = screen.getByRole("button", { name: /^Roadmap$/i });
     fireEvent.click(roadmapTabBtn);
 
+    // Arbitrary "Complete Module" button must NOT exist
+    expect(screen.queryByText("Complete Module")).toBeNull();
+
+    // Instead, evidence-based verification button is present when evidence is satisfied
     await waitFor(() => {
-      expect(screen.getByText("Complete Module")).toBeTruthy();
+      expect(screen.getByText("Verify Evidence")).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByText("Complete Module"));
+    fireEvent.click(screen.getByText("Verify Evidence"));
 
     await waitFor(() => {
-      expect(completeSpy).toHaveBeenCalledWith("student_test_1", "node_array_01");
+      expect(verifySpy).toHaveBeenCalledWith("student_test_1", "node_array_01");
     });
   });
 
@@ -902,7 +940,20 @@ describe("Scholar AI Frontend Integration Tests", () => {
       },
     ]);
     vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
-    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue({
+      total_events: 2,
+      first_attempt_pass_rate: 1.0,
+      hint_dependency_rate: 0.0,
+      average_duration_seconds: 120,
+      multi_attempt_count: 0,
+      topic_breakdown: {
+        "Arrays & Hashing": {
+          total: 2,
+          avg_attempts: 1,
+          hint_rate: 0,
+        },
+      },
+    });
 
     const startSpy = vi.spyOn(scholarApi, "startRoadmapNode").mockResolvedValue([
       {
@@ -986,7 +1037,20 @@ describe("Scholar AI Frontend Integration Tests", () => {
     });
     vi.spyOn(scholarApi, "getRoadmap").mockResolvedValue([]);
     vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
-    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue({
+      total_events: 2,
+      first_attempt_pass_rate: 1.0,
+      hint_dependency_rate: 0.0,
+      average_duration_seconds: 120,
+      multi_attempt_count: 0,
+      topic_breakdown: {
+        "Arrays & Hashing": {
+          total: 2,
+          avg_attempts: 1,
+          hint_rate: 0,
+        },
+      },
+    });
 
     render(
       <StudentDashboardView
@@ -1051,7 +1115,20 @@ describe("Scholar AI Frontend Integration Tests", () => {
       },
     ]);
     vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
-    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue({
+      total_events: 2,
+      first_attempt_pass_rate: 1.0,
+      hint_dependency_rate: 0.0,
+      average_duration_seconds: 120,
+      multi_attempt_count: 0,
+      topic_breakdown: {
+        "Arrays & Hashing": {
+          total: 2,
+          avg_attempts: 1,
+          hint_rate: 0,
+        },
+      },
+    });
 
     const detailsSpy = vi.spyOn(scholarApi, "getRoadmapNodeDetails").mockResolvedValue({
       id: "node_arr_01",
@@ -1135,7 +1212,20 @@ describe("Scholar AI Frontend Integration Tests", () => {
     });
     vi.spyOn(scholarApi, "getRoadmap").mockResolvedValue([]);
     vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
-    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue({
+      total_events: 2,
+      first_attempt_pass_rate: 1.0,
+      hint_dependency_rate: 0.0,
+      average_duration_seconds: 120,
+      multi_attempt_count: 0,
+      topic_breakdown: {
+        "Arrays & Hashing": {
+          total: 2,
+          avg_attempts: 1,
+          hint_rate: 0,
+        },
+      },
+    });
 
     const updateSpy = vi.spyOn(scholarApi, "updateStudentProfile").mockResolvedValue({
       id: "student_test_5",

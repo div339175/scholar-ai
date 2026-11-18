@@ -115,7 +115,7 @@ def start_roadmap_node(student_id: str, node_id: str, db: Session = Depends(get_
 def get_roadmap_node_details(student_id: str, node_id: str, db: Session = Depends(get_db)):
     """
     Returns rich curriculum details, learning objectives, required vs current telemetry evidence,
-    and prerequisite status for a clickable roadmap node.
+    prerequisite status, and system-derived effective state for a clickable roadmap node.
     """
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
@@ -159,9 +159,44 @@ def get_roadmap_node_details(student_id: str, node_id: str, db: Session = Depend
         MasteryAssessmentRecord.topic == node.topic,
     ).order_by(MasteryAssessmentRecord.created_at.desc()).first()
 
+    adaptation = RoadmapAdaptationService.determine_adaptation(db, student_id, skip_apply=True)
+    is_paused = bool(adaptation and adaptation.action == "PAUSE_ADVANCEMENT" and (adaptation.topic == node.topic or adaptation.topic is None))
+    is_remediation = bool(adaptation and (adaptation.action == "REMEDIATE_TOPIC" or node.node_type == NodeType.REMEDIATION.value))
+
+    # Derive system-authoritative effective module state
+    if node.status == NodeStatus.COMPLETED.value:
+        effective_state = "COMPLETED"
+        state_reason = "Module completed based on verified learning evidence."
+    elif is_paused:
+        effective_state = "MASTERY_CHECK_REQUIRED"
+        state_reason = "Scholar AI detected that additional mastery verification is required before advancement."
+    elif is_remediation:
+        effective_state = "REMEDIATION"
+        state_reason = "Your recent evidence suggests this topic needs reinforcement before you continue."
+    elif node.is_locked or not prereq_completed:
+        effective_state = "LOCKED"
+        state_reason = f"Module is locked. Prerequisite module #{node.sequence - 1} ({prereq_title or 'previous'}) must be completed first."
+    elif node.status == NodeStatus.PENDING.value:
+        effective_state = "AVAILABLE"
+        state_reason = "Prerequisites satisfied. Ready to start module."
+    elif solved_problems < required_evidence:
+        effective_state = "NEEDS_EVIDENCE"
+        state_reason = "Scholar AI needs more independent practice evidence before confirming this module."
+    else:
+        effective_state = "IN_PROGRESS"
+        state_reason = "Practice evidence satisfied. Ready for Scholar AI competence verification."
+
     what_you_learn = MODULE_LEARNING_OBJECTIVES.get(
         node.topic,
         ["Core algorithmic invariants", "Complexity bounds", "Pattern application"]
+    )
+
+    can_complete = (
+        solved_problems >= required_evidence
+        and not node.is_locked
+        and prereq_completed
+        and not is_paused
+        and not is_remediation
     )
 
     return {
@@ -169,6 +204,8 @@ def get_roadmap_node_details(student_id: str, node_id: str, db: Session = Depend
         "title": node.title,
         "topic": node.topic,
         "status": node.status,
+        "effective_state": effective_state,
+        "state_reason": state_reason,
         "sequence": node.sequence,
         "estimated_minutes": node.estimated_minutes,
         "is_locked": node.is_locked,
@@ -178,16 +215,16 @@ def get_roadmap_node_details(student_id: str, node_id: str, db: Session = Depend
         "current_evidence": solved_problems,
         "prerequisite_title": prereq_title,
         "prerequisite_completed": prereq_completed,
-        "mastery_status": mastery_record.decision if mastery_record else "NO_RECORD",
-        "can_complete": solved_problems >= required_evidence and not node.is_locked,
+        "mastery_status": ("MASTERED" if mastery_record.correct else "NOT_MASTERED") if mastery_record else "NO_RECORD",
+        "can_complete": can_complete,
     }
 
 
 @router.post("/{student_id}/roadmap/{node_id}/verify-completion")
 def verify_module_completion(student_id: str, node_id: str, db: Session = Depends(get_db)):
     """
-    Evidence-based module completion (Step 8):
-    Evaluates real telemetry evidence before allowing completion.
+    Evidence-based module completion:
+    Evaluates real telemetry evidence, prerequisites, and Scholar AI pauses before allowing completion.
     """
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
@@ -216,11 +253,17 @@ def verify_module_completion(student_id: str, node_id: str, db: Session = Depend
     adaptation = RoadmapAdaptationService.determine_adaptation(db, student_id, skip_apply=True)
     is_paused = adaptation and adaptation.action in ("PAUSE_ADVANCEMENT", "REMEDIATE_TOPIC")
     if is_paused:
+        status_label = "REMEDIATION" if adaptation.action == "REMEDIATE_TOPIC" else "MASTERY_CHECK_REQUIRED"
+        msg = (
+            f"Your recent assessment indicates {node.topic} requires reinforcement before advancement."
+            if adaptation.action == "REMEDIATE_TOPIC"
+            else f"Scholar AI detected that additional mastery verification is required before advancement on {node.topic}."
+        )
         return {
             "allowed": False,
-            "status": "PAUSED",
-            "message": f"Scholar AI paused advancement on {node.topic} due to false progress signals. Mastery verification required.",
-            "action": "COMPLETE_MASTERY_CHECK",
+            "status": status_label,
+            "message": msg,
+            "action": "COMPLETE_MASTERY_CHECK" if adaptation.action == "PAUSE_ADVANCEMENT" else "REMEDIATE",
         }
 
     # Evaluate telemetry evidence count
@@ -236,7 +279,7 @@ def verify_module_completion(student_id: str, node_id: str, db: Session = Depend
         return {
             "allowed": False,
             "status": "INSUFFICIENT_EVIDENCE",
-            "message": f"Module requires at least {required_count} solved problems on {node.topic} to demonstrate competence (currently {solved_count}/{required_count}).",
+            "message": f"Scholar AI needs more independent practice evidence before confirming this module ({solved_count}/{required_count} solved).",
             "current_evidence": solved_count,
             "required_evidence": required_count,
             "action": "PRACTICE",
@@ -273,13 +316,16 @@ def verify_module_completion(student_id: str, node_id: str, db: Session = Depend
 
 
 @router.post("/{student_id}/roadmap/{node_id}/complete", response_model=List[RoadmapNodeResponse])
-def complete_roadmap_node(student_id: str, node_id: str, db: Session = Depends(get_db)):
+def complete_roadmap_node(
+    student_id: str,
+    node_id: str,
+    force: bool = False,
+    db: Session = Depends(get_db),
+):
     """
-    Persistently completes a roadmap node in SQLite:
-    - Sets node status to COMPLETED and unlocks it.
-    - Updates student.roadmap_completion based on completed / total nodes.
-    - If advancement is not paused by Scholar AI, unlocks the next sequential normal node.
-    - Returns the updated roadmap node list.
+    Evidence-Enforced Roadmap Node Completion:
+    Bypassing evidence is strictly forbidden unless force=True is explicitly supplied
+    for admin fixtures or benchmark setups.
     """
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
@@ -297,6 +343,35 @@ def complete_roadmap_node(student_id: str, node_id: str, db: Session = Depends(g
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Roadmap node with ID '{node_id}' not found for student '{student_id}'",
         )
+
+    if not force:
+        adaptation = RoadmapAdaptationService.determine_adaptation(db, student_id, skip_apply=True)
+        is_paused = adaptation and adaptation.action in ("PAUSE_ADVANCEMENT", "REMEDIATE_TOPIC")
+        if is_paused:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Advancement is paused by Scholar AI pending mastery verification on {node.topic}.",
+            )
+
+        if node.is_locked:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot complete locked module #{node.sequence}. Complete prerequisite modules first.",
+            )
+
+        events = db.query(CodingTelemetry).filter(
+            CodingTelemetry.student_id == student_id,
+            CodingTelemetry.topic == node.topic,
+            CodingTelemetry.successful == True,
+        ).all()
+        solved_count = len(set(e.problem_id for e in events))
+        required_count = 3 if "Sliding Window" in node.topic else 2
+
+        if solved_count < required_count:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot complete module without evidence: requires at least {required_count} solved problems on {node.topic} (currently {solved_count}).",
+            )
 
     # Mark node completed
     node.status = NodeStatus.COMPLETED.value

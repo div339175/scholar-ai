@@ -285,6 +285,8 @@ export const scholarApi = {
     title: string;
     topic: string;
     status: string;
+    effective_state?: string;
+    state_reason?: string;
     sequence: number;
     estimated_minutes: number;
     is_locked: boolean;
