@@ -1,11 +1,21 @@
 import React, { useState } from "react";
-import { BrainCircuit, Lock, Mail, ArrowRight, X, UserCheck, ShieldAlert } from "lucide-react";
+import {
+  BrainCircuit,
+  UserCheck,
+  ShieldCheck,
+  ArrowRight,
+  X,
+  User,
+  RotateCcw,
+  Sparkles,
+} from "lucide-react";
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (email: string) => void;
+  onSuccess?: (studentId: string) => void;
   onSelectDemoStudent: (studentId: string) => void;
+  onStartOnboarding?: () => void;
 }
 
 export const AuthModal: React.FC<Props> = ({
@@ -13,16 +23,37 @@ export const AuthModal: React.FC<Props> = ({
   onClose,
   onSuccess,
   onSelectDemoStudent,
+  onStartOnboarding,
 }) => {
-  const [isSignUp, setIsSignUp] = useState<boolean>(false);
-  const [email, setEmail] = useState<string>("student@stepcode.dev");
-  const [password, setPassword] = useState<string>("••••••••");
+  const [customStudentId, setCustomStudentId] = useState<string>("");
+  const storedStudentId = localStorage.getItem("stepcode_active_student_id");
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleResumeStored = () => {
+    if (storedStudentId) {
+      if (onSuccess) onSuccess(storedStudentId);
+      else onSelectDemoStudent(storedStudentId);
+      onClose();
+    }
+  };
+
+  const handleLoadCustomId = (e: React.FormEvent) => {
     e.preventDefault();
-    onSuccess(email || "student@stepcode.dev");
+    if (!customStudentId.trim()) return;
+    const targetId = customStudentId.trim();
+    if (onSuccess) onSuccess(targetId);
+    else onSelectDemoStudent(targetId);
+    onClose();
+  };
+
+  const handleCreateNew = () => {
+    onClose();
+    if (onStartOnboarding) {
+      onStartOnboarding();
+    } else if (onSuccess) {
+      onSuccess("");
+    }
   };
 
   return (
@@ -43,7 +74,7 @@ export const AuthModal: React.FC<Props> = ({
         className="card"
         style={{
           width: "100%",
-          maxWidth: "460px",
+          maxWidth: "480px",
           background: "var(--bg-card)",
           border: "1px solid var(--border-subtle)",
           padding: "2rem",
@@ -58,13 +89,15 @@ export const AuthModal: React.FC<Props> = ({
             top: "1.25rem",
             right: "1.25rem",
             background: "transparent",
+            border: "none",
             color: "var(--text-muted)",
+            cursor: "pointer",
           }}
         >
           <X size={18} />
         </button>
 
-        <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
+        <div style={{ textAlign: "center", marginBottom: "1.25rem" }}>
           <div
             style={{
               width: "3rem",
@@ -81,14 +114,14 @@ export const AuthModal: React.FC<Props> = ({
             <BrainCircuit size={24} />
           </div>
           <h2 style={{ fontSize: "1.35rem", fontWeight: 700 }}>
-            {isSignUp ? "Create your Scholar AI Account" : "Welcome to Scholar AI"}
+            Scholar AI Session Switcher
           </h2>
           <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: "0.25rem" }}>
-            Your personalized competence mentor
+            Real SQLite student state & benchmark profiles
           </p>
         </div>
 
-        {/* Prototype notice badge */}
+        {/* Prototype architecture notice */}
         <div
           style={{
             display: "flex",
@@ -101,116 +134,175 @@ export const AuthModal: React.FC<Props> = ({
             fontSize: "0.78rem",
             color: "#93c5fd",
             marginBottom: "1.25rem",
+            lineHeight: 1.4,
           }}
         >
-          <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: "0.1rem" }} />
+          <ShieldCheck size={16} style={{ flexShrink: 0, marginTop: "0.1rem" }} />
           <span>
-            <strong>Prototype Demo Mode:</strong> Click below to proceed with local onboarding or quick-load benchmark evaluation profiles.
+            <strong>Deterministic State Persistence:</strong> All telemetry, false progress diagnostics, roadmap adaptations, and mastery records are backed by local SQLite.
           </span>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          <div>
-            <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.35rem" }}>
-              Email address
-            </label>
-            <div style={{ position: "relative" }}>
-              <Mail size={16} color="#6b7280" style={{ position: "absolute", left: "0.85rem", top: "50%", transform: "translateY(-50%)" }} />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                style={{ width: "100%", paddingLeft: "2.4rem" }}
-                placeholder="you@example.com"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.35rem" }}>
-              Password
-            </label>
-            <div style={{ position: "relative" }}>
-              <Lock size={16} color="#6b7280" style={{ position: "absolute", left: "0.85rem", top: "50%", transform: "translateY(-50%)" }} />
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={{ width: "100%", paddingLeft: "2.4rem" }}
-                placeholder="••••••••"
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            className="btn-primary"
+        {/* Option 1: Resume Active Stored Session */}
+        {storedStudentId && (
+          <div
             style={{
-              padding: "0.75rem",
-              marginTop: "0.5rem",
+              padding: "0.85rem 1rem",
+              borderRadius: "var(--radius-sm)",
+              background: "rgba(99, 102, 241, 0.08)",
+              border: "1px solid rgba(99, 102, 241, 0.25)",
+              marginBottom: "1.25rem",
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              gap: "0.4rem",
-              fontSize: "0.95rem",
+              justifyContent: "space-between",
+              gap: "0.75rem",
             }}
           >
-            <span>{isSignUp ? "Create Account & Onboard" : "Sign In to Scholar AI"}</span>
-            <ArrowRight size={16} />
-          </button>
+            <div>
+              <div style={{ fontSize: "0.75rem", color: "#818cf8", fontWeight: 600, textTransform: "uppercase" }}>
+                Active Stored Session
+              </div>
+              <div style={{ fontSize: "0.88rem", fontWeight: 700, fontFamily: "var(--font-mono)", color: "#f9fafb" }}>
+                {storedStudentId}
+              </div>
+            </div>
+            <button
+              onClick={handleResumeStored}
+              className="btn-primary"
+              style={{ fontSize: "0.8rem", padding: "0.4rem 0.85rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+            >
+              <RotateCcw size={13} />
+              <span>Resume</span>
+            </button>
+          </div>
+        )}
+
+        {/* Option 2: Load any Student by ID */}
+        <form onSubmit={handleLoadCustomId} style={{ marginBottom: "1.25rem" }}>
+          <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.35rem" }}>
+            Load student profile by ID
+          </label>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <User size={16} color="#6b7280" style={{ position: "absolute", left: "0.85rem", top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                type="text"
+                value={customStudentId}
+                onChange={(e) => setCustomStudentId(e.target.value)}
+                style={{ width: "100%", paddingLeft: "2.4rem", fontSize: "0.85rem" }}
+                placeholder="e.g. student_alex, student_priya..."
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!customStudentId.trim()}
+              className="btn-secondary"
+              style={{ fontSize: "0.82rem", padding: "0.5rem 0.9rem" }}
+            >
+              Load
+            </button>
+          </div>
         </form>
 
-        <div style={{ display: "flex", justifyContent: "center", marginTop: "1rem" }}>
-          <button
-            onClick={() => setIsSignUp(!isSignUp)}
-            style={{ background: "transparent", fontSize: "0.82rem", color: "#818cf8" }}
-          >
-            {isSignUp ? "Already have an account? Sign in" : "New to Scholar AI? Create account"}
-          </button>
-        </div>
-
-        {/* Quick Demo Access for Evaluators */}
-        <div style={{ marginTop: "1.5rem", paddingTop: "1.25rem", borderTop: "1px solid var(--border-subtle)" }}>
-          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", marginBottom: "0.75rem" }}>
-            Quick Evaluator Profiles
+        {/* Option 3: Quick Evaluator Benchmark Archetypes */}
+        <div style={{ marginBottom: "1.25rem" }}>
+          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>
+            Benchmark Evaluation Archetypes
           </div>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
             <button
               onClick={() => {
                 onSelectDemoStudent("student_alex");
                 onClose();
               }}
               className="btn-secondary"
-              style={{ flex: 1, fontSize: "0.78rem", padding: "0.5rem 0.3rem", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.3rem" }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "0.6rem 0.85rem",
+                fontSize: "0.82rem",
+                textAlign: "left",
+              }}
             >
-              <UserCheck size={13} color="#f87171" />
-              <span>Alex (False Progress)</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <UserCheck size={14} color="#f87171" />
+                <strong>Alex Sharma</strong>
+              </div>
+              <span className="badge badge-danger" style={{ fontSize: "0.7rem" }}>
+                False Progress (FPI: 85%)
+              </span>
             </button>
+
             <button
               onClick={() => {
                 onSelectDemoStudent("student_priya");
                 onClose();
               }}
               className="btn-secondary"
-              style={{ flex: 1, fontSize: "0.78rem", padding: "0.5rem 0.3rem", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.3rem" }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "0.6rem 0.85rem",
+                fontSize: "0.82rem",
+                textAlign: "left",
+              }}
             >
-              <UserCheck size={13} color="#34d399" />
-              <span>Priya (Autonomous)</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <UserCheck size={14} color="#34d399" />
+                <strong>Priya Mehta</strong>
+              </div>
+              <span className="badge badge-success" style={{ fontSize: "0.7rem" }}>
+                Genuine Mastery (Autonomous)
+              </span>
             </button>
+
             <button
               onClick={() => {
                 onSelectDemoStudent("student_marcus");
                 onClose();
               }}
               className="btn-secondary"
-              style={{ flex: 1, fontSize: "0.78rem", padding: "0.5rem 0.3rem", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.3rem" }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "0.6rem 0.85rem",
+                fontSize: "0.82rem",
+                textAlign: "left",
+              }}
             >
-              <UserCheck size={13} color="#38bdf8" />
-              <span>Marcus (Sparse)</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <UserCheck size={14} color="#38bdf8" />
+                <strong>Marcus Vance</strong>
+              </div>
+              <span className="badge badge-neutral" style={{ fontSize: "0.7rem" }}>
+                Sparse Telemetry (Baseline)
+              </span>
             </button>
           </div>
+        </div>
+
+        {/* Option 4: Fresh Student Onboarding */}
+        <div style={{ paddingTop: "1rem", borderTop: "1px solid var(--border-subtle)" }}>
+          <button
+            onClick={handleCreateNew}
+            className="btn-primary"
+            style={{
+              width: "100%",
+              padding: "0.7rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.4rem",
+              fontSize: "0.9rem",
+            }}
+          >
+            <Sparkles size={16} />
+            <span>Create New Student Profile (Onboarding)</span>
+            <ArrowRight size={15} />
+          </button>
         </div>
       </div>
     </div>

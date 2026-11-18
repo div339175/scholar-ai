@@ -168,6 +168,36 @@ def test_3_complete_roadmap_node_persists_and_updates_completion(client, db_sess
     assert student.roadmap_completion == 12.5
 
 
+def test_start_roadmap_node_validation(client, db_session):
+    """
+    Test start_roadmap_node endpoint:
+    - Attempting to start a locked node returns 400.
+    - Starting an unlocked pending node sets status to IN_PROGRESS.
+    """
+    resp = client.post("/api/students", json={"name": "Hannah Abbott", "career_goal": "DevOps"})
+    student_id = resp.json()["id"]
+
+    nodes = client.get(f"/api/students/{student_id}/roadmap").json()
+    locked_node = nodes[3]
+    assert locked_node["is_locked"] is True
+
+    # Try starting locked node -> 400
+    bad_start = client.post(f"/api/students/{student_id}/roadmap/{locked_node['id']}/start")
+    assert bad_start.status_code == 400
+
+    # Manually unlock a pending node in db to test successful start
+    db_node = db_session.query(RoadmapNode).filter(RoadmapNode.id == locked_node["id"]).first()
+    db_node.is_locked = False
+    db_node.status = NodeStatus.PENDING.value
+    db_session.commit()
+
+    good_start = client.post(f"/api/students/{student_id}/roadmap/{locked_node['id']}/start")
+    assert good_start.status_code == 200
+    updated_nodes = good_start.json()
+    started = next(n for n in updated_nodes if n["id"] == locked_node["id"])
+    assert started["status"] == "IN_PROGRESS"
+
+
 def test_4_generate_telemetry_persists_and_feeds_fpde(client, db_session):
     """
     Test 4: Generate telemetry.

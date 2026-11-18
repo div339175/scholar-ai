@@ -6,5 +6,8 @@ class ProblemResponse(BaseModel):
     title: str
     topic: str
     difficulty: str
+    description: Optional[str] = None
+    solved: Optional[bool] = False
+    attempts: Optional[int] = 0
 
     model_config = ConfigDict(from_attributes=True)

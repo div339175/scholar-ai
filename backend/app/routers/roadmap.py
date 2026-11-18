@@ -34,6 +34,48 @@ def add_roadmap_node(student_id: str, payload: RoadmapNodeCreate, db: Session = 
         )
     return RoadmapService.add_node(db, student_id, payload)
 
+@router.post("/{student_id}/roadmap/{node_id}/start", response_model=List[RoadmapNodeResponse])
+def start_roadmap_node(student_id: str, node_id: str, db: Session = Depends(get_db)):
+    """
+    Sets an unlocked pending roadmap node to IN_PROGRESS.
+    Fails if the node is locked or if advancement is paused by Scholar AI.
+    """
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student with ID '{student_id}' not found",
+        )
+
+    node = db.query(RoadmapNode).filter(
+        RoadmapNode.id == node_id,
+        RoadmapNode.student_id == student_id,
+    ).first()
+    if not node:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Roadmap node with ID '{node_id}' not found for student '{student_id}'",
+        )
+
+    if node.is_locked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot start locked module. Complete prerequisite modules first.",
+        )
+
+    adaptation = RoadmapAdaptationService.determine_adaptation(db, student_id, skip_apply=True)
+    is_paused = adaptation and adaptation.action in ("PAUSE_ADVANCEMENT", "REMEDIATE_TOPIC")
+    if is_paused:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Advancement is paused by Scholar AI pending mastery verification.",
+        )
+
+    node.status = NodeStatus.IN_PROGRESS.value
+    db.commit()
+    return RoadmapService.get_roadmap_for_student(db, student_id)
+
+
 @router.post("/{student_id}/roadmap/{node_id}/complete", response_model=List[RoadmapNodeResponse])
 def complete_roadmap_node(student_id: str, node_id: str, db: Session = Depends(get_db)):
     """

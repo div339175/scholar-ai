@@ -64,18 +64,17 @@ export const App: React.FC = () => {
   };
 
   const handleLogin = () => {
-    const stored = localStorage.getItem("stepcode_active_student_id");
-    if (stored) {
-      setSelectedStudentId(stored);
-      setIsDemoMode(false);
-      setCurrentView("dashboard");
-    } else {
-      setCurrentView("onboarding");
-    }
+    setIsAuthModalOpen(true);
   };
 
-  const handleAuthSuccess = (_email: string) => {
+  const handleAuthSuccess = (studentId?: string) => {
     setIsAuthModalOpen(false);
+    if (studentId && studentId.trim()) {
+      setSelectedStudentId(studentId);
+      setIsDemoMode(false);
+      setCurrentView("dashboard");
+      return;
+    }
     const stored = localStorage.getItem("stepcode_active_student_id");
     if (stored) {
       setSelectedStudentId(stored);
@@ -183,6 +182,10 @@ export const App: React.FC = () => {
         onClose={() => setIsAuthModalOpen(false)}
         onSuccess={handleAuthSuccess}
         onSelectDemoStudent={handleSelectDemoStudent}
+        onStartOnboarding={() => {
+          setIsAuthModalOpen(false);
+          setCurrentView("onboarding");
+        }}
       />
     </div>
   );

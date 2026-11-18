@@ -197,6 +197,14 @@ export const scholarApi = {
     return handleResponse<StudentProfile>(res);
   },
 
+  async startRoadmapNode(studentId: string, nodeId: string): Promise<any[]> {
+    const res = await fetch(
+      `${BASE_URL}/students/${encodeURIComponent(studentId)}/roadmap/${encodeURIComponent(nodeId)}/start`,
+      { method: "POST" }
+    );
+    return handleResponse<any[]>(res);
+  },
+
   async completeRoadmapNode(studentId: string, nodeId: string): Promise<any[]> {
     const res = await fetch(
       `${BASE_URL}/students/${encodeURIComponent(studentId)}/roadmap/${encodeURIComponent(nodeId)}/complete`,
@@ -205,12 +213,33 @@ export const scholarApi = {
     return handleResponse<any[]>(res);
   },
 
-  async getProblems(topic?: string): Promise<Array<{ id: string; title: string; topic: string; difficulty: string }>> {
-    const url = topic
-      ? `${BASE_URL}/problems?topic=${encodeURIComponent(topic)}`
-      : `${BASE_URL}/problems`;
+  async getProblems(
+    studentId?: string,
+    topic?: string
+  ): Promise<Array<{
+    id: string;
+    title: string;
+    topic: string;
+    difficulty: string;
+    description?: string;
+    solved?: boolean;
+    attempts?: number;
+  }>> {
+    const params = new URLSearchParams();
+    if (studentId) params.append("student_id", studentId);
+    if (topic) params.append("topic", topic);
+    const qs = params.toString();
+    const url = qs ? `${BASE_URL}/problems?${qs}` : `${BASE_URL}/problems`;
     const res = await fetch(url);
-    return handleResponse<Array<{ id: string; title: string; topic: string; difficulty: string }>>(res);
+    return handleResponse<Array<{
+      id: string;
+      title: string;
+      topic: string;
+      difficulty: string;
+      description?: string;
+      solved?: boolean;
+      attempts?: number;
+    }>>(res);
   },
 
   async recordTelemetry(

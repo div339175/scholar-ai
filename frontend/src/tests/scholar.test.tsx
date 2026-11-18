@@ -861,5 +861,90 @@ describe("Scholar AI Frontend Integration Tests", () => {
       expect(completeSpy).toHaveBeenCalledWith("student_test_1", "node_array_01");
     });
   });
+
+  // 20. Start Roadmap Node in Dashboard
+  it("invokes startRoadmapNode when starting an unlocked pending module in Roadmap tab", async () => {
+    vi.spyOn(scholarApi, "getStudentProfile").mockResolvedValue({
+      id: "student_test_2",
+      name: "Hannah Abbott",
+      career_goal: "DevOps",
+      weekly_hours: 10,
+      current_streak: 1,
+      roadmap_completion: 12.5,
+    });
+    vi.spyOn(scholarApi, "getScholarState").mockResolvedValue({
+      student_id: "student_test_2",
+      false_progress: { detected: false, index: 0.0, severity: "NONE", triggers: [] },
+      intervention: { required: false, type: "CONTINUE_NORMAL", priority: "LOW", target_topics: [], roadmap_action: "CONTINUE" },
+      mastery: { status: "NO_RECORDED_CHECK", topic: null, decision: null, conceptual_score: null, conceptual_score_source: null, independent_success: null },
+      roadmap: { action: "CONTINUE_NORMAL", topic: null, evidence_status: "CONTINUE" },
+      capability: { standard_readiness_score: 25.0, verified_capability_score: 25.0, readiness_status: "DEVELOPING", mastery_coverage: 12.5, mastery_confidence_multiplier: 1.0 },
+      evidence_chain: [],
+    });
+    vi.spyOn(scholarApi, "getNextAction").mockResolvedValue({
+      student_id: "student_test_2",
+      action: "CONTINUE_LEARNING",
+      target_topic: "Two Pointers",
+      reason: "Continue roadmap.",
+      source_components: [],
+    });
+    vi.spyOn(scholarApi, "getRoadmap").mockResolvedValue([
+      {
+        id: "node_tp_02",
+        student_id: "student_test_2",
+        title: "Two Pointers Mastery",
+        topic: "Two Pointers",
+        status: "PENDING",
+        sequence: 2,
+        estimated_minutes: 90,
+        is_locked: false,
+        node_type: "NORMAL",
+      },
+    ]);
+    vi.spyOn(scholarApi, "getProblems").mockResolvedValue([]);
+    vi.spyOn(scholarApi, "getTelemetryMetrics").mockResolvedValue(null);
+
+    const startSpy = vi.spyOn(scholarApi, "startRoadmapNode").mockResolvedValue([
+      {
+        id: "node_tp_02",
+        student_id: "student_test_2",
+        title: "Two Pointers Mastery",
+        topic: "Two Pointers",
+        status: "IN_PROGRESS",
+        sequence: 2,
+        estimated_minutes: 90,
+        is_locked: false,
+        node_type: "NORMAL",
+      },
+    ]);
+
+    render(
+      <StudentDashboardView
+        studentId="student_test_2"
+        isDemoMode={false}
+        onToggleDemoMode={vi.fn()}
+        onSelectStudent={vi.fn()}
+        onBackToLanding={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading your personalized/i)).toBeNull();
+    });
+
+    // Switch to Roadmap tab
+    const roadmapTabBtn = screen.getByRole("button", { name: /^Roadmap$/i });
+    fireEvent.click(roadmapTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Start Module")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText("Start Module"));
+
+    await waitFor(() => {
+      expect(startSpy).toHaveBeenCalledWith("student_test_2", "node_tp_02");
+    });
+  });
 });
 

@@ -23,6 +23,7 @@ import {
   Flame,
   CheckCircle2,
   Lock,
+  Play,
   AlertTriangle,
   ExternalLink,
   ChevronDown,
@@ -84,6 +85,9 @@ export const StudentDashboardView: React.FC<Props> = ({
     title: string;
     topic: string;
     difficulty: string;
+    description?: string;
+    solved?: boolean;
+    attempts?: number;
   }>>([]);
 
   const [selectedTopicFilter, setSelectedTopicFilter] = useState<string>("All");
@@ -92,6 +96,9 @@ export const StudentDashboardView: React.FC<Props> = ({
     title: string;
     topic: string;
     difficulty: string;
+    description?: string;
+    solved?: boolean;
+    attempts?: number;
   } | null>(null);
   const [customAttempts, setCustomAttempts] = useState<number>(1);
   const [customHints, setCustomHints] = useState<number>(0);
@@ -99,6 +106,7 @@ export const StudentDashboardView: React.FC<Props> = ({
   const [isSubmittingSolve, setIsSubmittingSolve] = useState<boolean>(false);
   const [solveNotification, setSolveNotification] = useState<string | null>(null);
   const [isCompletingNodeId, setIsCompletingNodeId] = useState<string | null>(null);
+  const [isStartingNodeId, setIsStartingNodeId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -142,7 +150,7 @@ export const StudentDashboardView: React.FC<Props> = ({
       try {
         const [nodes, probs, metrics] = await Promise.all([
           scholarApi.getRoadmap(studentId).catch(() => []),
-          scholarApi.getProblems().catch(() => []),
+          scholarApi.getProblems(studentId).catch(() => []),
           scholarApi.getTelemetryMetrics(studentId).catch(() => null),
         ]);
         setRoadmapNodes(nodes || []);
@@ -239,6 +247,19 @@ export const StudentDashboardView: React.FC<Props> = ({
       console.error("Failed to complete roadmap node:", err);
     } finally {
       setIsCompletingNodeId(null);
+    }
+  };
+
+  const handleStartNode = async (nodeId: string) => {
+    setIsStartingNodeId(nodeId);
+    try {
+      const updatedNodes = await scholarApi.startRoadmapNode(studentId, nodeId);
+      setRoadmapNodes(updatedNodes || []);
+      await loadData();
+    } catch (err) {
+      console.error("Failed to start roadmap node:", err);
+    } finally {
+      setIsStartingNodeId(null);
     }
   };
 
@@ -868,8 +889,10 @@ export const StudentDashboardView: React.FC<Props> = ({
               {roadmapNodes.map((node) => {
                 const isCompleted = node.status === "COMPLETED";
                 const isInProgress = node.status === "IN_PROGRESS";
+                const isPendingUnlocked = node.status === "PENDING" && !node.is_locked;
                 const isFocus = node.topic === nextAction?.target_topic;
                 const isCompletingThis = isCompletingNodeId === node.id;
+                const isStartingThis = isStartingNodeId === node.id;
 
                 return (
                   <div
@@ -895,26 +918,86 @@ export const StudentDashboardView: React.FC<Props> = ({
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      {/* Actions for IN_PROGRESS node */}
                       {isInProgress && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setSelectedTopicFilter(node.topic);
+                              setActiveTab("practice");
+                            }}
+                            className="btn-secondary"
+                            style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                          >
+                            <Code2 size={13} />
+                            <span>Practice Problems</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleCompleteNode(node.id)}
+                            disabled={isCompletingThis}
+                            className="btn-primary"
+                            style={{ fontSize: "0.75rem", padding: "0.35rem 0.75rem" }}
+                          >
+                            {isCompletingThis ? (
+                              <>
+                                <Loader2 size={13} className="animate-spin" />
+                                <span>Saving...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Check size={13} />
+                                <span>Complete Module</span>
+                              </>
+                            )}
+                          </button>
+                        </>
+                      )}
+
+                      {/* Actions for PENDING unlocked node */}
+                      {isPendingUnlocked && (
                         <button
-                          onClick={() => handleCompleteNode(node.id)}
-                          disabled={isCompletingThis}
-                          className="btn-primary"
-                          style={{ fontSize: "0.75rem", padding: "0.35rem 0.75rem" }}
+                          onClick={() => handleStartNode(node.id)}
+                          disabled={isStartingThis}
+                          className="btn-secondary"
+                          style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
                         >
-                          {isCompletingThis ? (
+                          {isStartingThis ? (
                             <>
                               <Loader2 size={13} className="animate-spin" />
-                              <span>Saving...</span>
+                              <span>Starting...</span>
                             </>
                           ) : (
                             <>
-                              <Check size={13} />
-                              <span>Complete Module</span>
+                              <Play size={13} />
+                              <span>Start Module</span>
                             </>
                           )}
                         </button>
+                      )}
+
+                      {/* Actions for COMPLETED node */}
+                      {isCompleted && (
+                        <button
+                          onClick={() => {
+                            handleExplainTopic(node.topic);
+                            setActiveTab("scholar");
+                          }}
+                          className="btn-secondary"
+                          style={{ fontSize: "0.75rem", padding: "0.35rem 0.6rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}
+                        >
+                          <BrainCircuit size={12} color="#818cf8" />
+                          <span>Review Invariants</span>
+                        </button>
+                      )}
+
+                      {/* Locked status subtitle */}
+                      {node.is_locked && (
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "0.25rem", marginRight: "0.25rem" }}>
+                          <Lock size={12} />
+                          <span>Requires #{node.sequence - 1}</span>
+                        </span>
                       )}
 
                       <span
@@ -1016,11 +1099,32 @@ export const StudentDashboardView: React.FC<Props> = ({
                     <div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.4rem" }}>
                         <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{prob.topic}</span>
-                        <span className={`badge ${diffBadgeClass}`} style={{ fontSize: "0.7rem" }}>
-                          {prob.difficulty}
-                        </span>
+                        <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                          {prob.solved ? (
+                            <span className="badge badge-success" style={{ fontSize: "0.7rem", display: "inline-flex", alignItems: "center", gap: "0.2rem" }}>
+                              <CheckCircle2 size={11} />
+                              <span>Solved</span>
+                            </span>
+                          ) : prob.attempts && prob.attempts > 0 ? (
+                            <span className="badge badge-warning" style={{ fontSize: "0.7rem" }}>
+                              {prob.attempts} {prob.attempts === 1 ? "att." : "atts."}
+                            </span>
+                          ) : (
+                            <span className="badge badge-neutral" style={{ fontSize: "0.7rem" }}>
+                              New
+                            </span>
+                          )}
+                          <span className={`badge ${diffBadgeClass}`} style={{ fontSize: "0.7rem" }}>
+                            {prob.difficulty}
+                          </span>
+                        </div>
                       </div>
                       <h3 style={{ fontSize: "1.05rem", fontWeight: 700, color: "#f9fafb" }}>{prob.title}</h3>
+                      {prob.description && (
+                        <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginTop: "0.35rem", lineHeight: 1.4 }}>
+                          {prob.description}
+                        </p>
+                      )}
                     </div>
 
                     <button
@@ -1395,9 +1499,26 @@ export const StudentDashboardView: React.FC<Props> = ({
               </button>
             </div>
 
-            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "1.5rem" }}>
+            <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "1rem" }}>
               Topic: <strong>{solvingProblem.topic}</strong> • Difficulty: <strong>{solvingProblem.difficulty}</strong>
             </div>
+
+            {solvingProblem.description && (
+              <div
+                style={{
+                  padding: "0.85rem 1rem",
+                  background: "rgba(255, 255, 255, 0.03)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: "0.85rem",
+                  lineHeight: 1.5,
+                  color: "#e2e8f0",
+                  marginBottom: "1.25rem",
+                }}
+              >
+                {solvingProblem.description}
+              </div>
+            )}
 
             <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", marginBottom: "1.25rem" }}>
               Choose a submission style to record real telemetry into SQLite:
